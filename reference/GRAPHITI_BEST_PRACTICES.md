@@ -17,7 +17,6 @@ Use `group_id` to segment knowledge domains:
 
 | Group Type | Example | Purpose |
 |------------|---------|---------|
-| Domain data | `don_branson_resume_11252025` | Project-specific content |
 | Meta-knowledge | `claude_meta_knowledge` | Best practices, learnings, procedures |
 
 **Rationale**: Separate groups enable targeted searches without noise and allow meta-knowledge to be reusable across projects.

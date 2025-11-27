@@ -76,6 +76,7 @@ database:
   providers:
     falkordb:
       uri: ${FALKORDB_URI:redis://localhost:6379}
+      username: ${FALKORDB_USER:}
       password: ${FALKORDB_PASSWORD:}
       database: ${FALKORDB_DATABASE:default_db}
 

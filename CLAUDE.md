@@ -37,9 +37,9 @@ This is a Graphiti MCP (Model Context Protocol) Server implementation that expos
 **Queue Service** (`src/services/queue_service.py`): Manages sequential episode processing per group_id. Episodes within the same group are processed sequentially to maintain consistency; different groups can process in parallel.
 
 **Factory Pattern** (`src/services/factories.py`): Creates LLM clients, embedders, and database drivers based on configuration. Supports multiple providers:
-- LLM: OpenAI, Anthropic, Gemini, Groq, Azure OpenAI
-- Embedder: OpenAI, Voyage, Sentence Transformers, Gemini
-- Database: FalkorDB, Neo4j
+- LLM: OpenAI, Anthropic, Gemini, Groq, Azure OpenAI (with Azure AD support)
+- Embedder: OpenAI, Azure OpenAI, Voyage, Sentence Transformers, Gemini
+- Database: FalkorDB (local and cloud), Neo4j
 
 **Configuration** (`src/config/schema.py`): Pydantic-based settings with YAML file support and environment variable expansion using `${VAR:default}` syntax.
 
@@ -73,7 +73,7 @@ uv add package-name
 
 **FalkorDB (Default - Combined Container):**
 ```bash
-docker compose up
+docker compose -f docker/docker-compose.yml up
 ```
 This starts both FalkorDB and MCP server in a single container.
 - FalkorDB Web UI: http://localhost:3000
@@ -96,11 +96,23 @@ docker compose -f docker/docker-compose-neo4j.yml up
 docker run -p 6379:6379 -p 3000:3000 -it --rm falkordb/falkordb:latest
 ```
 
+**FalkorDB Cloud (managed service):**
+For production deployments, FalkorDB Cloud provides managed instances. Configure via environment variables:
+```bash
+# In .env file
+FALKORDB_URI=redis://your-cloud-instance-endpoint:port
+FALKORDB_DATABASE=default_db
+FALKORDB_USER=your_cloud_username_here
+FALKORDB_PASSWORD=your_cloud_password_here
+```
+
+Note: FalkorDB Cloud requires authentication (username/password), while local instances typically don't.
+
 ### Running the Server
 
 **With Docker (recommended):**
 ```bash
-docker compose up
+docker compose -f docker/docker-compose.yml up
 ```
 
 **Direct execution:**
@@ -118,12 +130,6 @@ uv run src/graphiti_mcp_server.py --config config/config-docker-neo4j.yaml
 uv run src/graphiti_mcp_server.py --database-provider neo4j --llm-provider anthropic
 ```
 
-**Running the Jupyter notebook:**
-```bash
-jupyter notebook graphiti-falkordb-gs.ipynb
-```
-Or use VS Code with the Jupyter extension.
-
 ### Environment Variables
 
 Create a `.env` file in the project root:
@@ -132,16 +138,34 @@ Create a `.env` file in the project root:
 # Required - at least one LLM provider
 OPENAI_API_KEY=sk-...
 
-# Optional - other providers
+# Optional - other LLM providers
 ANTHROPIC_API_KEY=...
 GOOGLE_API_KEY=...
 GROQ_API_KEY=...
 
-# Database configuration
+# Optional - Azure OpenAI (alternative to OpenAI)
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=your-deployment-name
+AZURE_OPENAI_API_VERSION=2024-10-21
+USE_AZURE_AD=false  # Set to true for Azure Managed Identity auth
+
+# Database configuration - Neo4j
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=demodemo
+
+# Database configuration - FalkorDB Local
 FALKORDB_URI=redis://localhost:6379
+FALKORDB_DATABASE=default_db
+FALKORDB_USER=
+FALKORDB_PASSWORD=
+
+# Database configuration - FalkorDB Cloud
+# FALKORDB_URI=redis://your-cloud-instance-endpoint:port
+# FALKORDB_DATABASE=default_db
+# FALKORDB_USER=your_cloud_username_here
+# FALKORDB_PASSWORD=your_cloud_password_here
 
 # Performance tuning
 SEMAPHORE_LIMIT=10  # Concurrent episode processing limit
@@ -209,6 +233,15 @@ await graphiti.build_indices_and_constraints()
 
 This sets up entity types, constraints, and search indices.
 
+### OpenAI Reasoning Models (gpt-5, o1, o3)
+
+The server automatically detects and configures reasoning models correctly:
+- **Detection**: Models starting with `gpt-5`, `o1`, or `o3` are treated as reasoning models
+- **Configuration**: Reasoning models use `reasoning='minimal'` and `verbosity='low'` parameters
+- **Small model selection**: When using a reasoning model, the small model defaults to `gpt-5-nano` instead of `gpt-4.1-mini`
+
+No manual configuration needed - just set the model name in config or via `--model` flag.
+
 ### Working with Episodes
 
 All episode operations are async. Convert dicts to JSON strings for JSON episodes:
@@ -272,6 +305,28 @@ Symptoms:
 - Too high: 429 rate limit errors
 - Too low: Slow throughput
 
+## Code Style
+
+This project follows these code style conventions (enforced by ruff):
+
+- Line length: 100 characters
+- Quote style: Single quotes for strings
+- Import ordering: Enforced by isort (imports sorted alphabetically)
+- Formatting: 4-space indentation
+- Type checking: Basic level with pyright (Python 3.10+)
+
+Run linting and formatting:
+```bash
+# Format code
+uv run ruff format .
+
+# Check for issues
+uv run ruff check .
+
+# Type checking
+uv run pyright
+```
+
 ## Configuration Files
 
 - `config/config.yaml` - Default configuration
@@ -298,9 +353,7 @@ The server exposes these tools via MCP:
 
 **Start development environment:**
 ```bash
-docker compose up  # Start FalkorDB + MCP server
-# In another terminal:
-python graphiti-falkordb-gs.ipynb  # Or open in VS Code
+docker compose -f docker/docker-compose.yml up  # Start FalkorDB + MCP server
 ```
 
 **Switch database backends:**
@@ -312,8 +365,8 @@ docker compose -f docker/docker-compose-neo4j.yml up
 **Clear graph data:**
 ```bash
 docker compose down
-docker volume rm mcp_server_falkordb_data  # or docker_neo4j_data
-docker compose up
+docker volume rm docker_falkordb_data  # or docker_neo4j_data
+docker compose -f docker/docker-compose.yml up
 ```
 
 **View logs:**
@@ -325,3 +378,70 @@ docker compose logs -f neo4j
 **Access database UI:**
 - FalkorDB: http://localhost:3000
 - Neo4j: http://localhost:7474
+
+## Troubleshooting
+
+### Common Issues
+
+**"API key is not configured" error:**
+- Ensure the appropriate environment variable is set (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
+- For Azure OpenAI, verify AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT are set
+- Check that the .env file is in the project root and loaded correctly
+
+**429 Rate Limit Errors:**
+- Lower SEMAPHORE_LIMIT in .env based on your LLM provider tier (see Concurrency Control section)
+- OpenAI Tier 1 users should use SEMAPHORE_LIMIT=1-2
+- Monitor your API usage dashboard
+
+**FalkorDB connection failures:**
+```bash
+# Check if FalkorDB is running
+docker ps | grep falkordb
+
+# Test connection
+redis-cli -h localhost -p 6379 ping
+
+# For FalkorDB Cloud, verify credentials and endpoint
+```
+
+**Neo4j connection failures:**
+```bash
+# Check if Neo4j is running
+docker ps | grep neo4j
+
+# Test browser access
+curl http://localhost:7474
+
+# Verify credentials match NEO4J_PASSWORD in .env
+```
+
+**Import errors for optional providers:**
+- Install providers extra: `uv sync --extra providers`
+- This includes: Anthropic, Gemini, Groq, Voyage, Sentence Transformers
+
+**Azure AD authentication issues:**
+- Ensure Azure CLI is installed and authenticated: `az login`
+- Verify managed identity has appropriate permissions
+- Set USE_AZURE_AD=true in .env
+
+## Reference Documentation
+
+### When Working with Graphiti Knowledge Graphs
+
+**`reference/GRAPHITI_BEST_PRACTICES.md`** - Consult this file when:
+- Designing episode structures (JSON vs text, naming conventions)
+- Planning knowledge graph organization (group_id strategy)
+- Implementing MCP tool workflows (add_memory, search_nodes, search_memory_facts)
+- Verifying asynchronous episode processing
+- Building meta-knowledge systems that accumulate learnings across sessions
+
+Key topics: Episode categories (Lesson/Procedure/Best Practice/Anti-Pattern), JSON structure guidelines, verification patterns, relationship types.
+
+**`reference/CLAUDE_META_KNOWLEDGE_REVIEW.md`** - Reference when:
+- Evaluating knowledge graph quality and effectiveness
+- Understanding what makes good vs poor episode design
+- Learning from documented mistakes and corrections (meta-lessons on research-before-critique)
+- Deciding between knowledge graph storage vs other documentation methods
+- Planning knowledge consolidation strategies and lifecycle management
+
+Key topics: Structural critiques, query effectiveness analysis, domain separation, premature consolidation pitfalls, honest assessment of graph value vs alternatives.

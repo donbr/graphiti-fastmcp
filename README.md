@@ -1,15 +1,30 @@
-# Graphiti MCP Server
+# Graphiti FastMCP Server
 
-Graphiti is a framework for building and querying temporally-aware knowledge graphs, specifically tailored for AI agents
-operating in dynamic environments. Unlike traditional retrieval-augmented generation (RAG) methods, Graphiti
-continuously integrates user interactions, structured and unstructured enterprise data, and external information into a
-coherent, queryable graph. The framework supports incremental data updates, efficient retrieval, and precise historical
-queries without requiring complete graph recomputation, making it suitable for developing interactive, context-aware AI
-applications.
+> **Built on the excellent work by the [Zep](https://www.getzep.com/) team.**
+> This project is based on the [Graphiti MCP Server](https://github.com/getzep/graphiti/tree/main/mcp_server) from the official Graphiti repository.
 
-This is an experimental Model Context Protocol (MCP) server implementation for Graphiti. The MCP server exposes
-Graphiti's key functionality through the MCP protocol, allowing AI assistants to interact with Graphiti's knowledge
-graph capabilities.
+[Graphiti](https://github.com/getzep/graphiti) is a framework for building and querying temporally-aware knowledge graphs, specifically tailored for AI agents operating in dynamic environments. Unlike traditional retrieval-augmented generation (RAG) methods, Graphiti continuously integrates user interactions, structured and unstructured enterprise data, and external information into a coherent, queryable graph. The framework supports incremental data updates, efficient retrieval, and precise historical queries without requiring complete graph recomputation.
+
+This project is a focused copy of the MCP server directory with enhancements for production use and AI agent learning. It exposes Graphiti's key functionality through the Model Context Protocol (MCP), allowing AI assistants to interact with knowledge graph capabilities.
+
+## What's Different
+
+This implementation extends the original Graphiti MCP server with:
+
+| Enhancement | Description |
+|-------------|-------------|
+| **FastMCP Library** | Uses the standalone [`fastmcp`](https://github.com/jlowin/fastmcp) library instead of the MCP SDK's built-in implementation |
+| **FalkorDB Cloud Support** | Added `username` configuration property for FalkorDB Cloud authentication |
+| **AI Agent Learning Resources** | Progressive examples and documentation to help agents learn Graphiti effectively |
+| **Disaster Recovery** | Simple backup/restore process for agent memory via export/import scripts |
+
+### Quick Start Resources
+
+- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute guide for new Claude instances
+- **[examples/](examples/)** - Progressive MCP client examples
+- **[reference/GRAPHITI_BEST_PRACTICES.md](reference/GRAPHITI_BEST_PRACTICES.md)** - Episode design and knowledge graph patterns
+
+> **Version Note**: This project is pinned to `graphiti-core==0.24.1` to ensure compatibility.
 
 ## Features
 
@@ -540,30 +555,28 @@ For HTTP transport (default), you can use this configuration:
 
 The Graphiti MCP server exposes the following tools:
 
-- `add_episode`: Add an episode to the knowledge graph (supports text, JSON, and message formats)
+- `add_memory`: Add an episode to the knowledge graph (supports text, JSON, and message formats) - queued for async processing
 - `search_nodes`: Search the knowledge graph for relevant node summaries
-- `search_facts`: Search the knowledge graph for relevant facts (edges between entities)
-- `delete_entity_edge`: Delete an entity edge from the knowledge graph
-- `delete_episode`: Delete an episode from the knowledge graph
-- `get_entity_edge`: Get an entity edge by its UUID
+- `search_memory_facts`: Search the knowledge graph for relevant facts (edges between entities)
 - `get_episodes`: Get the most recent episodes for a specific group
+- `get_entity_edge`: Get an entity edge by its UUID
+- `delete_episode`: Delete an episode from the knowledge graph
+- `delete_entity_edge`: Delete an entity edge from the knowledge graph
 - `clear_graph`: Clear all data from the knowledge graph and rebuild indices
-- `get_status`: Get the status of the Graphiti MCP server and Neo4j connection
+- `get_status`: Get the status of the Graphiti MCP server and database connection
 
 ## Working with JSON Data
 
-The Graphiti MCP server can process structured JSON data through the `add_episode` tool with `source="json"`. This
+The Graphiti MCP server can process structured JSON data through the `add_memory` tool with `source="json"`. This
 allows you to automatically extract entities and relationships from structured data:
 
-```
-
-add_episode(
-name="Customer Profile",
-episode_body="{\"company\": {\"name\": \"Acme Technologies\"}, \"products\": [{\"id\": \"P001\", \"name\": \"CloudSync\"}, {\"id\": \"P002\", \"name\": \"DataMiner\"}]}",
-source="json",
-source_description="CRM data"
+```python
+add_memory(
+    name="Customer Profile",
+    episode_body='{"company": {"name": "Acme Technologies"}, "products": [{"id": "P001", "name": "CloudSync"}, {"id": "P002", "name": "DataMiner"}]}',
+    source="json",
+    source_description="CRM data"
 )
-
 ```
 
 ## Integrating with the Cursor IDE
@@ -680,4 +693,6 @@ For complete details about what's collected and why, see the [Telemetry section 
 
 ## License
 
-This project is licensed under the same license as the parent Graphiti project.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+This is the same license as the parent [Graphiti project](https://github.com/getzep/graphiti).

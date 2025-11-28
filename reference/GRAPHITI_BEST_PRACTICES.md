@@ -2,6 +2,10 @@
 
 A guide for effectively using the `graphiti-memory` MCP with Claude Code to build temporal knowledge graphs that accumulate learnings across sessions.
 
+> **New here?** Start with [`QUICKSTART.md`](../QUICKSTART.md) for a 5-minute introduction.
+>
+> **Want real-world examples?** See [`GRAPHITI_MCP_LESSONS_LEARNED.md`](./GRAPHITI_MCP_LESSONS_LEARNED.md) for hands-on discoveries.
+
 ## Overview
 
 Graphiti is a temporal knowledge graph that transforms information into a richly connected network of:

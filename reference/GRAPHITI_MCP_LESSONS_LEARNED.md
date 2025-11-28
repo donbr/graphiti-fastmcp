@@ -1,5 +1,9 @@
 # Graphiti MCP Lessons Learned: Research Session 2025-11-27
 
+> **Prerequisites:** Read [`GRAPHITI_BEST_PRACTICES.md`](./GRAPHITI_BEST_PRACTICES.md) first for foundational concepts.
+>
+> **Quick start:** See [`QUICKSTART.md`](../QUICKSTART.md) for immediate action items.
+
 ## Meta-Context
 
 This document captures practical lessons learned during a hands-on research session using the `graphiti-memory` MCP to build a decision-tree knowledge graph for agent memory architectures. These are real-world observations from actually using the tools, complementing the theoretical best practices in `GRAPHITI_BEST_PRACTICES.md`.

@@ -11,5 +11,26 @@ wheels/
 
 # Environment variables with secrets
 .env
+**/.env
 .env.local
 .env.*.local
+!.env.example # keep example env files
+
+# protected - reverse architecture directories
+ra_*/
+
+# protected - other
+backups/
+blog/
+
+# protected - original research and proprietary processes
+research/
+
+# open source best practices - potential IP should be added to research/
+# reference/GRAPHITI_BEST_PRACTICES.md
+# reference/GRAPHITI_MCP_LESSONS_LEARNED.md
+# reference/CLAUDE_META_KNOWLEDGE_REVIEW.md
+# reference/AGENTIC_MEMORY_2025_LANDSCAPE.md
+
+# open source operational scripts - should be screend for embedded IP
+# scripts/populate_meta_knowledge.py

@@ -6,22 +6,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Graphiti MCP (Model Context Protocol) Server implementation that exposes knowledge graph functionality through the MCP protocol. The project demonstrates integration of **Graphiti** (knowledge graph framework) with **FalkorDB** (in-memory graph database) and **Neo4j**.
 
+> **Quick start**: See `QUICKSTART.md` for a 5-minute introduction.
+
 ## Architecture
 
-### Three-Layer Architecture
+### Four-Layer Architecture
 
-1. **MCP Server Layer** (`src/graphiti_mcp_server.py`)
+1. **Presentation Layer** (`src/graphiti_mcp_server.py`)
    - FastMCP-based server exposing Graphiti tools via MCP protocol
    - Supports HTTP (default) and stdio transports
-   - Queue-based episode processing with configurable concurrency
+   - Tool decorators with type-safe validation
 
-2. **Intelligence Layer** (Graphiti Framework)
+2. **Services Layer** (`src/services/`)
+   - GraphitiService: Client lifecycle management
+   - QueueService: Async episode processing with per-group_id queues
+   - Factories: Runtime provider selection (LLM, Embedder, Database)
+
+3. **Core Integration Layer** (Graphiti Framework)
    - Automatic entity/relationship extraction from episodes
    - Hybrid search (vector similarity + BM25 keyword retrieval)
    - Temporal knowledge tracking with reference times
    - Center node reranking for graph-aware search
 
-3. **Infrastructure Layer** (Database Drivers)
+4. **Data Persistence Layer** (Database Drivers)
    - FalkorDB: Redis-based in-memory graph database (default)
    - Neo4j: Production-grade graph database option
 
@@ -339,9 +346,9 @@ Configuration uses YAML with environment variable expansion: `${VAR_NAME:default
 ## MCP Tools Exposed
 
 The server exposes these tools via MCP:
-- `add_episode` - Add text/JSON/message episodes
+- `add_memory` - Add text/JSON/message episodes (queued for async processing)
 - `search_nodes` - Search for entity node summaries
-- `search_facts` - Search for relationships/edges
+- `search_memory_facts` - Search for relationships/edges between entities
 - `get_episodes` - Retrieve recent episodes
 - `delete_episode` - Remove an episode
 - `get_entity_edge` - Get edge by UUID
@@ -425,6 +432,12 @@ curl http://localhost:7474
 - Set USE_AZURE_AD=true in .env
 
 ## Reference Documentation
+
+### Additional Documentation
+
+- **`architecture/`** - Detailed architecture documentation including component inventory, data flows, and API reference
+- **`examples/`** - MCP SDK learning tutorials (`01_connect_and_discover.py`, `02_call_tools.py`, `03_graphiti_memory.py`, `04_mcp_concepts.py`)
+- **`scripts/`** - Operational utilities for backup/restore (`export_graph.py`, `import_graph.py`, `populate_meta_knowledge.py`, `verify_meta_knowledge.py`)
 
 ### When Working with Graphiti Knowledge Graphs
 

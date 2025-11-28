@@ -26,6 +26,8 @@ Run examples in order - each builds on the previous:
 | 3 | `03_graphiti_memory.py` | All 9 Graphiti knowledge graph operations |
 | 4 | `04_mcp_concepts.py` | MCP primitives: Tools vs Resources vs Prompts |
 
+> **Looking for operational utilities?** See the [`scripts/`](../scripts/) directory for backup/restore and data management tools.
+
 ### Run an example
 
 ```bash

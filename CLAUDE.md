@@ -115,6 +115,19 @@ FALKORDB_PASSWORD=your_cloud_password_here
 
 Note: FalkorDB Cloud requires authentication (username/password), while local instances typically don't.
 
+**FalkorDB Cloud Health Check:**
+Monitor your FalkorDB Cloud instance size and health (free tier limit: 100 MB):
+```bash
+uv run scripts/check_falkordb_health.py
+```
+
+This script reports:
+- Redis memory usage (used, peak, RSS, max)
+- Per-graph storage size, node counts, and edge counts
+- Free tier usage percentage with status (OK/WARNING/CRITICAL)
+
+Exit codes: 0=OK, 1=WARNING (>70%), 2=CRITICAL (>90%)
+
 ### Running the Server
 
 **With Docker (recommended):**
@@ -437,7 +450,7 @@ curl http://localhost:7474
 
 - **`architecture/`** - Detailed architecture documentation including component inventory, data flows, and API reference
 - **`examples/`** - MCP SDK learning tutorials (`01_connect_and_discover.py`, `02_call_tools.py`, `03_graphiti_memory.py`, `04_mcp_concepts.py`)
-- **`scripts/`** - Operational utilities for backup/restore (`export_graph.py`, `import_graph.py`, `populate_meta_knowledge.py`, `verify_meta_knowledge.py`)
+- **`scripts/`** - Operational utilities for backup/restore (`export_graph.py`, `import_graph.py`, `populate_meta_knowledge.py`, `verify_meta_knowledge.py`, `check_falkordb_health.py`)
 
 ### When Working with Graphiti Knowledge Graphs
 

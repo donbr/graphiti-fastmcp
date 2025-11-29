@@ -255,8 +255,8 @@ After doing the research:
 
 **Available tools I should have used first**:
 - `mcp__graphiti-memory__search_nodes` / `search_memory_facts` - verify actual graph state
-- `mcp__ai-docs-server__fetch_docs` - official Graphiti documentation
-- `mcp__MCP_DOCKER__search_arxiv` / `search_semantic` - academic literature
-- `mcp__MCP_DOCKER__resolve-library-id` + `get-library-docs` - Context7 documentation
+- `mcp__ai-docs-server__fetch_docs` - official Graphiti documentation (via Zep llms.txt)
+- `WebSearch` - academic literature and general web research
+- `mcp__Context7__resolve-library-id` + `mcp__Context7__get-library-docs` - library documentation
 
 **The meta-lesson**: Criticism without research is speculation. The tools exist - use them.

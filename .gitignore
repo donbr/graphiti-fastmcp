@@ -21,7 +21,7 @@ ra_*/
 
 # protected - other
 backups/
-blog/
+# blog/  # Now public - educational content under Apache 2.0
 
 # protected - original research and proprietary processes
 research/
@@ -34,3 +34,5 @@ research/
 
 # open source operational scripts - should be screend for embedded IP
 # scripts/populate_meta_knowledge.py
+
+scratchpad.md

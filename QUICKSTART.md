@@ -2,27 +2,44 @@
 
 A 5-minute guide to get a new Claude instance connected and productive with Graphiti knowledge graphs.
 
+> **🔒 SECURITY WARNING**: Never commit sensitive information to version control or knowledge graphs:
+> - API keys, passwords, tokens, credentials
+> - Credit card numbers, financial data
+> - Personal Identifiable Information (PII): names, addresses, SSNs, emails
+> - Protected Health Information (PHI): medical records, diagnoses, prescriptions
+> - Proprietary business data
+>
+> **All episodes added to knowledge graphs are stored in plaintext**. Use `.gitignore` for sensitive backups.
+> See [CLAUDE.md:194](CLAUDE.md#L194) for environment variable best practices.
+
 ---
 
 ## First 3 Commands
 
-Run these immediately to verify your connection and understand what knowledge exists:
+Run these immediately to verify connection and recover context:
 
 ```python
 # 1. Check connection
 get_status()
 # Expected: {"status": "ok", "group_ids": [...]}
 
-# 2. Query existing meta-knowledge (how to use Graphiti)
+# 2. Recover recent session context (if continuing after compression)
+search_memory_facts(
+    query="session priorities pending tasks",
+    group_ids=["graphiti_meta_knowledge"],
+    max_facts=10
+)
+# Look for: "Next session priorities", "PRIORITY_INCLUDES" facts
+
+# 3. Query meta-knowledge about using Graphiti (if first time)
 search_memory_facts(
     query="best practices episode design",
     group_ids=["graphiti_meta_knowledge"],
     max_facts=5
 )
-
-# 3. See what domain graphs exist
-get_episodes(group_ids=["agent_memory_decision_tree_2025"], max_episodes=5)
 ```
+
+**Note**: Command #2 recovers context from previous sessions. Command #3 teaches Graphiti basics.
 
 ---
 
@@ -119,9 +136,35 @@ This creates 10 foundational episodes covering:
 | `search_nodes` | Find entities |
 | `search_memory_facts` | Find relationships |
 | `get_episodes` | List stored episodes |
+| `get_entity_edge` | Get edge/relationship by UUID |
 | `delete_episode` | Remove episode |
 | `delete_entity_edge` | Remove relationship |
 | `clear_graph` | Clear all data for group(s) |
+
+---
+
+## Available Documentation Tools
+
+Beyond Graphiti memory, you have access to comprehensive documentation search:
+
+| Tool | Coverage | Use For |
+|------|----------|---------|
+| `mcp__qdrant-docs__search_docs` | 2,670 pages (Anthropic, Zep, LangChain, Prefect, FastMCP, PydanticAI, McpProtocol) | Semantic search of official docs |
+| `mcp__ai-docs-server__fetch_docs` | 13 frameworks (llms.txt format) | Fetch specific documentation pages |
+| `mcp__ai-docs-server-full__fetch_docs` | 11 frameworks (llms-full.txt format) | Full documentation versions |
+| `mcp__Context7__get-library-docs` | Library documentation | Up-to-date library references |
+
+**Quick example:**
+```python
+# Search Anthropic documentation for prompt caching
+mcp__qdrant-docs__search_docs(
+    query="prompt caching implementation",
+    source="Anthropic",
+    k=3
+)
+```
+
+See [`reference/QUICK_START_QDRANT_MCP_CLIENT.md`](reference/QUICK_START_QDRANT_MCP_CLIENT.md) for detailed usage guide.
 
 ---
 

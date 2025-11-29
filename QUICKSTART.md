@@ -119,6 +119,7 @@ This creates 10 foundational episodes covering:
 | `search_nodes` | Find entities |
 | `search_memory_facts` | Find relationships |
 | `get_episodes` | List stored episodes |
+| `get_entity_edge` | Get edge/relationship by UUID |
 | `delete_episode` | Remove episode |
 | `delete_entity_edge` | Remove relationship |
 | `clear_graph` | Clear all data for group(s) |

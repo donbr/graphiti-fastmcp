@@ -21,7 +21,7 @@ ra_*/
 
 # protected - other
 backups/
-blog/
+# blog/  # Now public - educational content under Apache 2.0
 
 # protected - original research and proprietary processes
 research/

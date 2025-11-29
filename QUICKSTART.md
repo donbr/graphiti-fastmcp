@@ -2,6 +2,16 @@
 
 A 5-minute guide to get a new Claude instance connected and productive with Graphiti knowledge graphs.
 
+> **🔒 SECURITY WARNING**: Never commit sensitive information to version control or knowledge graphs:
+> - API keys, passwords, tokens, credentials
+> - Credit card numbers, financial data
+> - Personal Identifiable Information (PII): names, addresses, SSNs, emails
+> - Protected Health Information (PHI): medical records, diagnoses, prescriptions
+> - Proprietary business data
+>
+> **All episodes added to knowledge graphs are stored in plaintext**. Use `.gitignore` for sensitive backups.
+> See [CLAUDE.md:194](CLAUDE.md#L194) for environment variable best practices.
+
 ---
 
 ## First 3 Commands

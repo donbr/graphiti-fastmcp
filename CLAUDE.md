@@ -191,7 +191,13 @@ FALKORDB_PASSWORD=
 SEMAPHORE_LIMIT=10  # Concurrent episode processing limit
 ```
 
-**Important**: Never commit `.env` files with real API keys. Only commit `.env.example` with placeholders.
+**🔒 SECURITY CRITICAL**:
+- **Never commit `.env` files** with real API keys, passwords, or credentials
+- **Only commit `.env.example`** with placeholder values
+- **Never add sensitive data to knowledge graphs**: API keys, passwords, PII, PHI, financial data
+- **Knowledge graph episodes are stored in plaintext** - treat them as public data
+- **Use `.gitignore`** to protect `backups/` directory containing graph exports
+- **Verify `.gitignore`** before committing: `git check-ignore -v backups/`
 
 ## Testing
 

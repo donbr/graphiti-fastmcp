@@ -174,6 +174,31 @@ uv run src/graphiti_mcp_server.py --destroy-graph
 - HTTP endpoint: `http://localhost:8000/mcp/`
 - Health check: `http://localhost:8000/health`
 
+### Deployment to Production
+
+**FastMCP Cloud (Recommended for Production):**
+
+FastMCP Cloud is a managed hosting platform that automatically builds and deploys your MCP server from GitHub.
+
+**Quick deployment:**
+1. Run verification: `uv run python scripts/verify_fastmcp_cloud_readiness.py`
+2. Visit [fastmcp.cloud](https://fastmcp.cloud) and sign in with GitHub
+3. Create project with entrypoint: `src/graphiti_mcp_server.py:mcp`
+4. Set environment variables in the FastMCP Cloud UI
+5. Deploy (builds automatically from `main` branch)
+
+**Key points:**
+- ✅ FastMCP Cloud uses module-level server instance (already configured)
+- ✅ Dependencies auto-detected from `pyproject.toml`
+- ✅ Environment variables set in Cloud UI (NOT `.env` files)
+- ✅ `if __name__ == "__main__"` blocks are IGNORED by FastMCP Cloud
+- ✅ Free while in beta, HTTPS included, auto-redeploys on git push
+
+**📖 Full guide:** See [`docs/FASTMCP_CLOUD_DEPLOYMENT.md`](docs/FASTMCP_CLOUD_DEPLOYMENT.md) for complete deployment instructions, troubleshooting, and best practices.
+
+**Self-hosted deployment:**
+For VPS/container deployments, use Docker Compose (see above) or deploy as a standard Python web application with `uv run src/graphiti_mcp_server.py`.
+
 ### Environment Variables
 
 Create a `.env` file in the project root:

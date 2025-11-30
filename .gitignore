@@ -39,3 +39,7 @@ research/
 # scripts/populate_meta_knowledge.py
 
 scratchpad.md
+pending_episodes/2025-11-29_qdrant_docs_procedure.json
+pending_episodes/2025-11-29_qdrant_docs_antipattern.json
+pending_episodes/2025-11-29_qdrant_docs_best_practice.json
+pending_episodes/2025-11-29_qdrant_docs_reference.json

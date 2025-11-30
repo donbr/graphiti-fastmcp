@@ -1,12 +1,5 @@
 {
   "mcpServers": {
-    "graphiti-memory": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "http://localhost:8000/mcp"
-      ]
-    },
     "mcp-server-time": {
       "command": "uvx",
       "args": [
@@ -73,60 +66,6 @@
         "docs.prefect.io",
         "getzep.com"
       ]
-    },
-    "ai-docs-server-full": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "mcpdoc",
-        "mcpdoc",
-        "--urls",
-        "CursorFull:https://docs.cursor.com/llms-full.txt",
-        "PydanticAIFull:https://ai.pydantic.dev/llms-full.txt",
-        "McpProtocolFull:https://modelcontextprotocol.io/llms-full.txt",
-        "FastMCPFull:https://gofastmcp.com/llms-full.txt",
-        "LangChainFull:https://docs.langchain.com/llms-full.txt",
-        "PrefectFull:https://docs.prefect.io/llms-full.txt",
-        "AnthropicFull:https://docs.anthropic.com/llms-full.txt",
-        "OpenAIFull:https://cdn.openai.com/API/docs/txt/llms-full.txt",
-        "VueFull:https://vuejs.org/llms-full.txt",
-        "SupabaseFull:https://supabase.com/llms-full.txt",
-        "ZepFull:https://help.getzep.com/llms-full.txt",
-        "--transport",
-        "stdio",
-        "--follow-redirects",
-        "--timeout",
-        "20",
-        "--allowed-domains",
-        "ai.pydantic.dev",
-        "modelcontextprotocol.io",
-        "raw.githubusercontent.com",
-        "docs.langchain.com",
-        "sdk.vercel.ai",
-        "docs.cursor.com",
-        "docs.anthropic.com",
-        "gofastmcp.com",
-        "google-a2a.github.io",
-        "vuejs.org",
-        "supabase.com",
-        "cdn.openai.com",
-        "docs.prefect.io",
-        "getzep.com"
-      ]
-    },
-    "qdrant-docs": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "run",
-        "python",
-        "mcp_server.py"
-      ],
-      "env": {
-        "QDRANT_API_URL": "https://...",
-        "QDRANT_API_KEY": "...",
-        "OPENAI_API_KEY": "..."
-      }
     }
   }
 }

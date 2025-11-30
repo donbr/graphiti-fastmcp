@@ -24,7 +24,23 @@ The `qdrant-docs` server provides **2 tools** for semantic documentation search:
 - `FastMCP` (175 pages)
 - `McpProtocol` (44 pages)
 - `PydanticAI` (127 pages)
-- `Zep` (119 pages)
+- `Zep` (119 pages) - **Includes Graphiti knowledge graph framework**
+
+> **Important: Graphiti Documentation**
+>
+> Graphiti is a Zep product, and all Graphiti documentation is included in the **Zep** source (119 pages total).
+>
+> When searching for Graphiti-related topics, use `source="Zep"`:
+> - Graphiti MCP Server implementation
+> - Episode management and knowledge graphs
+> - LLM configuration (OpenAI, Anthropic, Gemini, Groq, Ollama)
+> - Graph database setup (Neo4j, FalkorDB)
+> - CRUD operations, communities, search strategies
+>
+> **Example queries:**
+> - "Show me Graphiti MCP server documentation" → searches Zep source
+> - "How does Graphiti handle episodes?" → searches Zep source
+> - "Graphiti FalkorDB configuration" → searches Zep source
 
 ---
 
@@ -33,6 +49,20 @@ The `qdrant-docs` server provides **2 tools** for semantic documentation search:
 **What it does:** Shows all available documentation sources and page counts.
 
 **Parameters:** None
+
+---
+
+## Source-to-Product Mapping
+
+Understanding what each source contains helps you search more effectively:
+
+- **Anthropic**: Claude API, prompt engineering, model capabilities, rate limits
+- **FastMCP**: MCP server creation, tools, transports, HTTP/stdio configuration
+- **LangChain**: RAG, agents, document loaders, vector stores, retrieval strategies
+- **McpProtocol**: MCP protocol specifications, client/server implementation
+- **Prefect**: Workflow orchestration, error handling, data pipelines
+- **PydanticAI**: AI agent framework with validation, type safety
+- **Zep**: Zep platform + **Graphiti knowledge graph framework** (episodes, entities, edges, temporal graphs)
 
 ---
 
@@ -122,6 +152,24 @@ Uses: search_docs("Qdrant connection errors troubleshooting", k=5)
 - Relevant troubleshooting documentation
 - Common error solutions
 - Configuration examples
+
+---
+
+### Graphiti/Knowledge Graph Search
+
+**What to ask:**
+> "How do I configure Graphiti to use FalkorDB Cloud?"
+
+**What Claude Code does:**
+```
+Uses: search_docs("FalkorDB Cloud configuration", source="Zep", k=5)
+```
+
+**What you get:**
+- Graphiti database configuration documentation
+- FalkorDB connection setup (local and cloud)
+- Authentication and connection string examples
+- Neo4j vs FalkorDB comparison
 
 ---
 
@@ -229,6 +277,37 @@ Response: Compares approaches from both frameworks' official docs
 Uses: search_docs("retrieval strategies", source="LangChain", k=3)
 Uses: search_docs("retrieval strategies", source="PydanticAI", k=3)
 Response: Detailed comparison of retrieval approaches
+```
+
+---
+
+### Flow 4: Working with Graphiti
+
+**You:**
+> "I need to build a knowledge graph for my AI agent using Graphiti"
+
+**Claude Code:**
+```
+Uses: search_docs("getting started quickstart", source="Zep", k=5)
+Response: Returns Graphiti installation, setup, and basic usage
+```
+
+**You:**
+> "How do I add episodes to the Graphiti knowledge graph?"
+
+**Claude Code:**
+```
+Uses: search_docs("adding episodes knowledge graph", source="Zep", k=5)
+Response: Returns documentation about episode management, text/JSON/message formats
+```
+
+**You:**
+> "What LLM providers can I use with Graphiti besides OpenAI?"
+
+**Claude Code:**
+```
+Uses: search_docs("LLM provider configuration", source="Zep", k=5)
+Response: Returns configuration for Anthropic, Gemini, Groq, Azure OpenAI, Ollama
 ```
 
 ---
@@ -432,13 +511,13 @@ The MCP server does **not** have:
 ❌ Blog posts or tutorials (only official docs)
 
 It **only** searches official documentation from:
-- Anthropic
-- LangChain
-- Prefect
-- FastMCP
-- McpProtocol
-- PydanticAI
-- Zep
+- Anthropic (Claude API)
+- LangChain (RAG framework)
+- Prefect (Workflow orchestration)
+- FastMCP (MCP server framework)
+- McpProtocol (MCP specifications)
+- PydanticAI (AI agent framework)
+- Zep (Memory platform + **Graphiti knowledge graphs**)
 
 ---
 
@@ -456,6 +535,7 @@ It **only** searches official documentation from:
 - "Show me PydanticAI getting started guide"
 - "FastMCP tutorial for beginners"
 - "LangChain basic RAG example"
+- "Graphiti knowledge graph quickstart" (searches Zep source)
 
 ---
 
@@ -471,6 +551,7 @@ It **only** searches official documentation from:
 - "Anthropic Messages API parameters"
 - "LangChain document loader API"
 - "Prefect flow decorator options"
+- "Graphiti add_episode method parameters" (searches Zep source)
 
 ---
 
@@ -486,6 +567,7 @@ It **only** searches official documentation from:
 - "Qdrant connection timeout errors"
 - "OpenAI rate limit handling"
 - "LangChain memory serialization issues"
+- "Graphiti FalkorDB connection errors" (searches Zep source)
 
 ---
 
@@ -501,6 +583,7 @@ It **only** searches official documentation from:
 - "Compare LangChain vs PydanticAI agent architectures"
 - "Prefect workflow best practices for data pipelines"
 - "Anthropic prompt engineering guidelines"
+- "Graphiti temporal knowledge graph design patterns" (searches Zep source)
 
 ---
 
@@ -563,6 +646,7 @@ The search understands **concepts**, not just keywords:
 | List all sources | "What documentation is available?" | `list_sources()` |
 | Basic search | "How do I build RAG agents?" | `search_docs(query, k=5)` |
 | Filtered search | "Show me Anthropic docs about streaming" | `search_docs(query, source="Anthropic")` |
+| Graphiti search | "Graphiti FalkorDB setup guide" | `search_docs(query, source="Zep")` |
 | More results | "Find 10 results about error handling" | `search_docs(query, k=10)` |
 | Compare frameworks | "LangChain vs PydanticAI for agents" | Multiple `search_docs()` calls |
 | Troubleshoot | "Qdrant connection errors" | `search_docs(error_message)` |

@@ -6,7 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Graphiti MCP (Model Context Protocol) Server implementation that exposes knowledge graph functionality through the MCP protocol. The project demonstrates integration of **Graphiti** (knowledge graph framework) with **FalkorDB** (in-memory graph database) and **Neo4j**.
 
+**Built on [Zep's Graphiti](https://github.com/getzep/graphiti)**, this is a production-enhanced fork of the official MCP server with:
+- FastMCP library (standalone vs SDK built-in)
+- FalkorDB Cloud support with authentication
+- AI agent learning resources (progressive examples)
+- Disaster recovery (backup/restore scripts)
+
 > **Quick start**: See `QUICKSTART.md` for a 5-minute introduction.
+> **Version**: Pinned to `graphiti-core==0.24.1` for stability.
 
 ## Architecture
 
@@ -132,10 +139,17 @@ Exit codes: 0=OK, 1=WARNING (>70%), 2=CRITICAL (>90%)
 
 **With Docker (recommended):**
 ```bash
+# Default: Combined FalkorDB + MCP server
 docker compose -f docker/docker-compose.yml up
+
+# Alternative: Neo4j backend
+docker compose -f docker/docker-compose-neo4j.yml up
+
+# Alternative: Separate FalkorDB containers
+docker compose -f docker/docker-compose-falkordb.yml up
 ```
 
-**Direct execution:**
+**Direct execution (local development):**
 ```bash
 # Using main.py (wrapper)
 python main.py
@@ -143,12 +157,47 @@ python main.py
 # Using the actual server module
 uv run src/graphiti_mcp_server.py
 
-# With specific configuration
+# With specific configuration file
 uv run src/graphiti_mcp_server.py --config config/config-docker-neo4j.yaml
 
 # With command-line overrides
 uv run src/graphiti_mcp_server.py --database-provider neo4j --llm-provider anthropic
+
+# With group-id namespace
+uv run src/graphiti_mcp_server.py --group-id my_project
+
+# Destroy and rebuild graph on startup
+uv run src/graphiti_mcp_server.py --destroy-graph
 ```
+
+**MCP server endpoints after startup:**
+- HTTP endpoint: `http://localhost:8000/mcp/`
+- Health check: `http://localhost:8000/health`
+
+### Deployment to Production
+
+**FastMCP Cloud (Recommended for Production):**
+
+FastMCP Cloud is a managed hosting platform that automatically builds and deploys your MCP server from GitHub.
+
+**Quick deployment:**
+1. Run verification: `uv run python scripts/verify_fastmcp_cloud_readiness.py`
+2. Visit [fastmcp.cloud](https://fastmcp.cloud) and sign in with GitHub
+3. Create project with entrypoint: `src/graphiti_mcp_server.py:mcp`
+4. Set environment variables in the FastMCP Cloud UI
+5. Deploy (builds automatically from `main` branch)
+
+**Key points:**
+- ✅ FastMCP Cloud uses module-level server instance (already configured)
+- ✅ Dependencies auto-detected from `pyproject.toml`
+- ✅ Environment variables set in Cloud UI (NOT `.env` files)
+- ✅ `if __name__ == "__main__"` blocks are IGNORED by FastMCP Cloud
+- ✅ Free while in beta, HTTPS included, auto-redeploys on git push
+
+**📖 Full guide:** See [`docs/FASTMCP_CLOUD_DEPLOYMENT.md`](docs/FASTMCP_CLOUD_DEPLOYMENT.md) for complete deployment instructions, troubleshooting, and best practices.
+
+**Self-hosted deployment:**
+For VPS/container deployments, use Docker Compose (see above) or deploy as a standard Python web application with `uv run src/graphiti_mcp_server.py`.
 
 ### Environment Variables
 
@@ -191,13 +240,28 @@ FALKORDB_PASSWORD=
 SEMAPHORE_LIMIT=10  # Concurrent episode processing limit
 ```
 
-**🔒 SECURITY CRITICAL**:
+**🔒 SECURITY CRITICAL** (from global user instructions):
 - **Never commit `.env` files** with real API keys, passwords, or credentials
 - **Only commit `.env.example`** with placeholder values
 - **Never add sensitive data to knowledge graphs**: API keys, passwords, PII, PHI, financial data
 - **Knowledge graph episodes are stored in plaintext** - treat them as public data
 - **Use `.gitignore`** to protect `backups/` directory containing graph exports
 - **Verify `.gitignore`** before committing: `git check-ignore -v backups/`
+
+Example `.env` structure (see `.env.example` for full template):
+```bash
+# Required - at least one LLM provider
+OPENAI_API_KEY=sk-...
+
+# Database - choose FalkorDB (local/cloud) or Neo4j
+FALKORDB_URI=redis://localhost:6379
+FALKORDB_DATABASE=default_db
+FALKORDB_USER=                    # Required for FalkorDB Cloud
+FALKORDB_PASSWORD=                # Required for FalkorDB Cloud
+
+# Performance tuning
+SEMAPHORE_LIMIT=10               # Adjust based on LLM tier (see Concurrency Control)
+```
 
 ## Testing
 
@@ -243,6 +307,33 @@ pytest -m "not slow"
 See `tests/README.md` for detailed test documentation.
 
 ## Key Development Patterns
+
+### Service Layer Pattern
+
+The server uses a factory pattern for provider selection:
+
+```python
+# LLM client creation (in src/services/factories.py)
+llm_client = create_llm_client(
+    provider="openai",          # or "anthropic", "gemini", "groq", "azure_openai"
+    model="gpt-4.1-mini",
+    temperature=0.7
+)
+
+# Database driver creation
+graph_driver = create_graph_driver(
+    provider="falkordb",        # or "neo4j"
+    uri="redis://localhost:6379",
+    username="",                # Required for FalkorDB Cloud
+    password=""
+)
+
+# Embedder creation
+embedder = create_embedder(
+    provider="openai",          # or "voyage", "gemini", "sentence_transformers"
+    model="text-embedding-3-small"
+)
+```
 
 ### Graphiti Initialization
 
@@ -333,24 +424,31 @@ Symptoms:
 
 ## Code Style
 
-This project follows these code style conventions (enforced by ruff):
+This project follows these code style conventions (enforced by ruff and pyright):
 
-- Line length: 100 characters
-- Quote style: Single quotes for strings
-- Import ordering: Enforced by isort (imports sorted alphabetically)
-- Formatting: 4-space indentation
-- Type checking: Basic level with pyright (Python 3.10+)
+- **Line length**: 100 characters (enforced by ruff)
+- **Quote style**: Single quotes for strings
+- **Import ordering**: Alphabetical, enforced by isort
+- **Formatting**: 4-space indentation
+- **Type checking**: Basic level with pyright (Python 3.10+)
+- **Docstring format**: Google-style docstrings with code formatting enabled
 
 Run linting and formatting:
 ```bash
-# Format code
+# Format all code (auto-fix)
 uv run ruff format .
 
-# Check for issues
+# Check for linting issues
 uv run ruff check .
+
+# Auto-fix linting issues
+uv run ruff check --fix .
 
 # Type checking
 uv run pyright
+
+# Run all checks before committing
+uv run ruff format . && uv run ruff check --fix . && uv run pyright
 ```
 
 ## Configuration Files
@@ -449,6 +547,37 @@ curl http://localhost:7474
 - Ensure Azure CLI is installed and authenticated: `az login`
 - Verify managed identity has appropriate permissions
 - Set USE_AZURE_AD=true in .env
+
+## Operational Utilities
+
+### Backup and Restore
+
+Export and import graph data for disaster recovery:
+
+```bash
+# Export graph to JSON file
+uv run scripts/export_graph.py --group-id my_project --output backups/my_project_backup.json
+
+# Import graph from JSON file
+uv run scripts/import_graph.py --input backups/my_project_backup.json --group-id my_project
+
+# Verify import succeeded
+uv run scripts/verify_meta_knowledge.py --group-id my_project
+```
+
+**Security note**: Exported JSON files contain plaintext episode data. Add `backups/` to `.gitignore` and verify with `git check-ignore -v backups/`.
+
+### Populating Meta-Knowledge
+
+Bootstrap the `graphiti_meta_knowledge` group with foundational learning episodes:
+
+```bash
+# Create 10 episodes covering best practices, naming conventions, verification patterns
+uv run scripts/populate_meta_knowledge.py
+
+# Verify the meta-knowledge was created
+uv run scripts/verify_meta_knowledge.py
+```
 
 ## Reference Documentation
 

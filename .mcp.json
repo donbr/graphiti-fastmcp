@@ -113,20 +113,6 @@
         "docs.prefect.io",
         "getzep.com"
       ]
-    },
-    "qdrant-docs": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "run",
-        "python",
-        "mcp_server.py"
-      ],
-      "env": {
-        "QDRANT_API_URL": "https://...",
-        "QDRANT_API_KEY": "...",
-        "OPENAI_API_KEY": "..."
-      }
     }
   }
 }

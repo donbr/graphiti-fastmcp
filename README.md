@@ -512,7 +512,7 @@ To use the Graphiti MCP server with other MCP-compatible clients, configure it t
 ```json
 {
   "mcpServers": {
-    "graphiti-memory": {
+    "graphiti-fastmcp": {
       "transport": "stdio",
       "command": "/Users/<user>/.local/bin/uv",
       "args": [
@@ -543,7 +543,7 @@ For HTTP transport (default), you can use this configuration:
 ```json
 {
   "mcpServers": {
-    "graphiti-memory": {
+    "graphiti-fastmcp": {
       "transport": "http",
       "url": "http://localhost:8000/mcp/"
     }
@@ -602,7 +602,7 @@ docker compose up
 ```json
 {
   "mcpServers": {
-    "graphiti-memory": {
+    "graphiti-fastmcp": {
       "url": "http://localhost:8000/mcp/"
     }
   }
@@ -641,7 +641,7 @@ The Graphiti MCP Server uses HTTP transport (at endpoint `/mcp/`). Claude Deskto
     ```json
     {
       "mcpServers": {
-        "graphiti-memory": {
+        "graphiti-fastmcp": {
           // You can choose a different name if you prefer
           "command": "npx", // Or the full path to mcp-remote if npx is not in your PATH
           "args": [
@@ -653,7 +653,7 @@ The Graphiti MCP Server uses HTTP transport (at endpoint `/mcp/`). Claude Deskto
     }
     ```
 
-    If you already have an `mcpServers` entry, add `graphiti-memory` (or your chosen name) as a new key within it.
+    If you already have an `mcpServers` entry, add `graphiti-fastmcp` (or your chosen name) as a new key within it.
 
 4.  **Restart Claude Desktop** for the changes to take effect.
 

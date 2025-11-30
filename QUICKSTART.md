@@ -72,7 +72,7 @@ Critical concepts:
 
 ```python
 # JSON episode (for structured data)
-mcp__graphiti-memory__add_memory(
+mcp__graphiti-fastmcp__add_memory(
     name="Architecture: MySystem - Characteristics",
     episode_body='{"system": "MySystem", "strengths": ["fast", "reliable"], "ideal_for": ["production"]}',
     source="json",
@@ -81,7 +81,7 @@ mcp__graphiti-memory__add_memory(
 )
 
 # Text episode (for narratives)
-mcp__graphiti-memory__add_memory(
+mcp__graphiti-fastmcp__add_memory(
     name="Lesson: MySystem - Performance Discovery",
     episode_body="We discovered that MySystem performs best when...",
     source="text",

@@ -254,7 +254,7 @@ After doing the research:
 - Academic papers (arXiv, Semantic Scholar) confirm LLM-driven KG construction is an active research area with similar approaches
 
 **Available tools I should have used first**:
-- `mcp__graphiti-memory__search_nodes` / `search_memory_facts` - verify actual graph state
+- `mcp__graphiti-fastmcp__search_nodes` / `search_memory_facts` - verify actual graph state
 - `mcp__ai-docs-server__fetch_docs` - official Graphiti documentation (via Zep llms.txt)
 - `WebSearch` - academic literature and general web research
 - `mcp__Context7__resolve-library-id` + `mcp__Context7__get-library-docs` - library documentation

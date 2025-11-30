@@ -1,6 +1,6 @@
 # Graphiti Memory Best Practices for Claude Code
 
-A guide for effectively using the `graphiti-memory` MCP with Claude Code to build temporal knowledge graphs that accumulate learnings across sessions.
+A guide for effectively using the `graphiti-fastmcp` MCP with Claude Code to build temporal knowledge graphs that accumulate learnings across sessions.
 
 > **New here?** Start with [`QUICKSTART.md`](../QUICKSTART.md) for a 5-minute introduction.
 >
@@ -13,7 +13,7 @@ Graphiti is a temporal knowledge graph that transforms information into a richly
 - **Nodes**: Extracted entities
 - **Facts**: Relationships between entities with temporal metadata
 
-The `graphiti-memory` MCP provides tools to interact with Graphiti directly from Claude Code.
+The `graphiti-fastmcp` MCP provides tools to interact with Graphiti directly from Claude Code.
 
 ## Group Organization Strategy
 
@@ -114,7 +114,7 @@ When using `source="json"`:
 
 ### Key Insight: MCP Context Requirement
 
-MCP tools like `mcp__graphiti-memory__add_memory` are **only accessible within Claude's context** (Claude Code, Cursor with MCP).
+MCP tools like `mcp__graphiti-fastmcp__add_memory` are **only accessible within Claude's context** (Claude Code, Cursor with MCP).
 
 Standalone Python scripts cannot directly call MCP tools. Options:
 1. Use Claude's direct MCP tool access for ingestion
@@ -191,7 +191,7 @@ Common edge types extracted by Graphiti:
 ### Add a Best Practice
 
 ```python
-mcp__graphiti-memory__add_memory(
+mcp__graphiti-fastmcp__add_memory(
     name="Best Practice: JSON Ingestion - Flattening",
     episode_body='{"id": "bp_001", "name": "...", "description": "...", "practices": [...]}',
     source="json",
@@ -203,7 +203,7 @@ mcp__graphiti-memory__add_memory(
 ### Add a Session Learning
 
 ```python
-mcp__graphiti-memory__add_memory(
+mcp__graphiti-fastmcp__add_memory(
     name="Lesson: MCP Tools - Context Requirement",
     episode_body="Key learning: MCP tools only accessible within Claude context...",
     source="text",

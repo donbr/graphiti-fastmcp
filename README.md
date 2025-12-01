@@ -23,8 +23,10 @@ This implementation extends the original Graphiti MCP server with:
 - **[QUICKSTART.md](QUICKSTART.md)** - 5-minute guide for new Claude instances
 - **[examples/](examples/)** - Progressive MCP client examples
 - **[reference/GRAPHITI_BEST_PRACTICES.md](reference/GRAPHITI_BEST_PRACTICES.md)** - Episode design and knowledge graph patterns
+- **[docs/FACTORY_PATTERN_COMPLETE.md](docs/FACTORY_PATTERN_COMPLETE.md)** - Factory pattern implementation and deployment guide
 
 > **Version Note**: This project is pinned to `graphiti-core==0.24.1` to ensure compatibility.
+> **Production Entrypoint**: Use `src/server.py:create_server` for FastMCP Cloud deployments (factory pattern).
 
 ## Features
 
@@ -509,6 +511,7 @@ To use the Graphiti MCP server with other MCP-compatible clients, configure it t
 >
 > Ensure that you set the full path to the `uv` binary and your Graphiti project folder.
 
+**Option 1: stdio transport (legacy - for local development)**
 ```json
 {
   "mcpServers": {
@@ -519,27 +522,24 @@ To use the Graphiti MCP server with other MCP-compatible clients, configure it t
         "run",
         "--isolated",
         "--directory",
-        "/Users/<user>>/dev/zep/graphiti/mcp_server",
+        "/Users/<user>/dev/graphiti-fastmcp",
         "--project",
         ".",
-        "graphiti_mcp_server.py",
+        "src/graphiti_mcp_server.py",
         "--transport",
         "stdio"
       ],
       "env": {
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USER": "neo4j",
-        "NEO4J_PASSWORD": "password",
-        "OPENAI_API_KEY": "sk-XXXXXXXX",
-        "MODEL_NAME": "gpt-4.1-mini"
+        "FALKORDB_URI": "redis://localhost:6379",
+        "FALKORDB_DATABASE": "default_db",
+        "OPENAI_API_KEY": "sk-XXXXXXXX"
       }
     }
   }
 }
 ```
 
-For HTTP transport (default), you can use this configuration:
-
+**Option 2: HTTP transport (recommended - works with factory pattern)**
 ```json
 {
   "mcpServers": {
@@ -550,6 +550,8 @@ For HTTP transport (default), you can use this configuration:
   }
 }
 ```
+
+> **Note**: For FastMCP Cloud deployments, use entrypoint `src/server.py:create_server`
 
 ## Available Tools
 

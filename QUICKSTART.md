@@ -20,11 +20,11 @@ Run these immediately to verify connection and recover context:
 
 ```python
 # 1. Check connection
-get_status()
+mcp__graphiti-fastmcp__get_status()
 # Expected: {"status": "ok", "group_ids": [...]}
 
 # 2. Recover recent session context (if continuing after compression)
-search_memory_facts(
+mcp__graphiti-fastmcp__search_memory_facts(
     query="session priorities pending tasks",
     group_ids=["graphiti_meta_knowledge"],
     max_facts=10
@@ -32,7 +32,7 @@ search_memory_facts(
 # Look for: "Next session priorities", "PRIORITY_INCLUDES" facts
 
 # 3. Query meta-knowledge about using Graphiti (if first time)
-search_memory_facts(
+mcp__graphiti-fastmcp__search_memory_facts(
     query="best practices episode design",
     group_ids=["graphiti_meta_knowledge"],
     max_facts=5
@@ -51,7 +51,7 @@ Before deploying to FastMCP Cloud, validate your server with TWO commands:
 
 ```bash
 # Verify server structure and tool registration
-uv run fastmcp inspect src/graphiti_mcp_server.py:mcp
+uv run fastmcp inspect src/server.py:create_server
 ```
 
 **Expected output:**
@@ -70,7 +70,7 @@ This checks that the module can be imported and tools are registered.
 
 ```bash
 # Run interactive inspector - tests actual initialization
-uv run fastmcp dev src/graphiti_mcp_server.py:mcp
+uv run fastmcp dev src/server.py:create_server
 ```
 
 This starts your server and opens an interactive web UI at `http://localhost:6274` where you can:
@@ -80,7 +80,7 @@ This starts your server and opens an interactive web UI at `http://localhost:627
 
 **In the web UI, run:**
 1. Click "get_status" tool
-2. Expected: `{"status": "ok", "message": "...connected to FalkorDB..."}`
+2. Expected: `{"status": "ok", "message": "Graphiti MCP server is running and connected to falkordb database"}`
 3. If you see `"Graphiti service not initialized"`, fix initialization issues before deploying
 
 **If validation fails:**
@@ -118,42 +118,104 @@ Critical concepts:
 
 ## Adding Your First Episode
 
+### JSON Episodes (Structured Comparisons)
+
+**Use JSON for**: Architecture characteristics, decision criteria, structured comparisons
+
 ```python
-# JSON episode (for structured data)
+# Architecture characteristics with consistent schema
 mcp__graphiti-fastmcp__add_memory(
     name="Architecture: MySystem - Characteristics",
-    episode_body='{"system": "MySystem", "strengths": ["fast", "reliable"], "ideal_for": ["production"]}',
+    episode_body='{"system": "MySystem", "strengths": ["low latency", "horizontal scaling", "real-time processing"], "weaknesses": ["complex setup", "requires monitoring"], "ideal_for": ["high-throughput APIs", "real-time analytics"], "cost_profile": {"latency": "low", "operational_overhead": "medium"}}',
     source="json",
-    source_description="Initial system documentation",
-    group_id="my_project_knowledge"
+    source_description="System architecture comparison",
+    group_id="architecture_decision_tree_2025"
 )
 
-# Text episode (for narratives)
+# Decision criteria with multiple options
 mcp__graphiti-fastmcp__add_memory(
-    name="Lesson: MySystem - Performance Discovery",
-    episode_body="We discovered that MySystem performs best when...",
-    source="text",
-    source_description="Session learning from testing",
-    group_id="my_project_knowledge"
+    name="Decision: Database Selection - Criteria",
+    episode_body='{"decision": "database_selection", "options": [{"name": "PostgreSQL", "strengths": ["ACID compliance", "mature ecosystem"]}, {"name": "FalkorDB", "strengths": ["graph queries", "Redis-based"]}], "requirements": ["sub-100ms queries", "graph traversal"], "constraints": ["max 2GB dataset", "cloud deployment"]}',
+    source="json",
+    source_description="Database selection decision tree",
+    group_id="architecture_decision_tree_2025"
 )
 ```
+
+**Why JSON works well**:
+- Consistent schema enables cross-entity comparison
+- Nested objects preserve semantic relationships
+- Arrays extract as individual facts
+- Produces high-quality entity extraction (labels: Organization, Topic, Requirement)
+
+### Text Episodes (Narrative Explanations)
+
+**Use text for**: Pattern evolution, causal explanations, historical context
+
+```python
+# Pattern evolution with temporal relationships
+mcp__graphiti-fastmcp__add_memory(
+    name="Lesson: FastMCP Deployment - Evolution from Global State to Factory Pattern",
+    episode_body="The deployment pattern evolved from using global state (2024) to factory pattern (2025). The key innovation was recognizing that FastMCP Cloud ignores if __name__ == '__main__' blocks. This represents a shift from imperative initialization to declarative factory functions. The factory pattern produces cleaner testability and eliminates global state complexity.",
+    source="text",
+    source_description="Deployment pattern evolution lesson",
+    group_id="agent_memory_decision_tree_2025"
+)
+
+# Causal explanation with solution
+mcp__graphiti-fastmcp__add_memory(
+    name="Lesson: Graphiti Service Initialization - Root Cause Discovery",
+    episode_body="We discovered that 'Graphiti service not initialized' errors occurred because FastMCP Cloud uses fastmcp run internally, which completely disregards the if __name__ == '__main__' block. The solution was implementing a create_server() factory function that initializes services before returning the FastMCP instance. This fixed deployment failures by ensuring initialization happens on module import, not script execution.",
+    source="text",
+    source_description="Debugging session discovery",
+    group_id="graphiti_meta_knowledge"
+)
+```
+
+**Why text works well**:
+- Enables temporal relationships (EVOLVED_TO, INTRODUCED_BY)
+- Causal explanations become SOLUTION_FOR edges
+- Narrative structure helps extraction understand progression
+- Provides valid_at dates from historical context
 
 ---
 
 ## Verification Pattern (Essential!)
 
-After adding episodes, verify extraction worked:
+After adding episodes, verify extraction worked using the **Three-Tool Verification Pattern**:
 
 ```python
-# Step 1: Confirm episode stored (immediate)
-get_episodes(group_ids=["my_project_knowledge"], max_episodes=5)
+# Step 1: Confirm episode stored (immediate - no wait needed)
+mcp__graphiti-fastmcp__get_episodes(
+    group_ids=["architecture_decision_tree_2025"],
+    max_episodes=5
+)
+# ✅ Confirms: Episode ingested successfully
 
-# Step 2: Verify entities extracted (wait 5-10 sec)
-search_nodes(query="MySystem", group_ids=["my_project_knowledge"], max_nodes=5)
+# Step 2: Verify entities extracted (wait 5-10 seconds)
+mcp__graphiti-fastmcp__search_nodes(
+    query="MySystem latency",
+    group_ids=["architecture_decision_tree_2025"],
+    max_nodes=5
+)
+# ✅ Confirms: Entities created (e.g., "MySystem", "low latency", "horizontal scaling")
 
-# Step 3: Verify relationships created (wait 10-15 sec)
-search_memory_facts(query="MySystem strengths", group_ids=["my_project_knowledge"], max_facts=5)
+# Step 3: Verify relationships created (wait 15-20 seconds total from add_memory)
+mcp__graphiti-fastmcp__search_memory_facts(
+    query="MySystem strengths and ideal use cases",
+    group_ids=["architecture_decision_tree_2025"],
+    max_facts=5
+)
+# ✅ Confirms: Relationships extracted (e.g., "MySystem HAS_STRENGTH low latency", "MySystem IDEAL_FOR real-time analytics")
 ```
+
+**Key insight from `graphiti_meta_knowledge`**:
+> "add_memory queues processing; episodes stored immediately while entity/relationship extraction completes in 5–15 seconds. Wait 15–20 seconds after add_memory before final verification."
+
+**What each tool validates**:
+1. **get_episodes** - Episode ingestion (immediate)
+2. **search_nodes** - Entity extraction (5-10s delay)
+3. **search_memory_facts** - Relationship formation (15-20s total delay)
 
 ---
 
@@ -163,7 +225,7 @@ If `graphiti_meta_knowledge` is empty, bootstrap it:
 
 ```bash
 # From project root
-uv run python examples/populate_meta_knowledge.py
+uv run python scripts/populate_meta_knowledge.py
 ```
 
 This creates 10 foundational episodes covering:

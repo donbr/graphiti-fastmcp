@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import logging
 import os
+import secrets
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -23,6 +24,8 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from config.schema import GraphitiConfig
+from middleware.auth import BearerTokenAuthMiddleware
+from middleware.authorization import RoleBasedAuthorizationMiddleware
 from models.response_types import (
     EpisodeSearchResponse,
     ErrorResponse,
@@ -32,6 +35,7 @@ from models.response_types import (
     StatusResponse,
     SuccessResponse,
 )
+from services.auth_service import AuthService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
 from utils.formatting import format_fact_result
@@ -185,10 +189,10 @@ async def create_server() -> FastMCP:
     # 2. Initialize Services
     factory_graphiti_service = GraphitiService(factory_config, SEMAPHORE_LIMIT)
     factory_queue_service = QueueService()
-    
+
     # Await initialization of the Graphiti service
     await factory_graphiti_service.initialize()
-    
+
     # Initialize queue with the Graphiti client
     client = await factory_graphiti_service.get_client()
     await factory_queue_service.initialize(client)
@@ -200,6 +204,44 @@ async def create_server() -> FastMCP:
         'Graphiti Agent Memory',
         instructions=GRAPHITI_MCP_INSTRUCTIONS,
     )
+
+    # 3.5 Configure Authentication (User Story 1)
+    # API key format: sk_<env>_<random> (e.g., sk_prod_AbCdEf123...)
+    auth_enabled = os.getenv('GRAPHITI_AUTH_ENABLED', 'true').lower() == 'true'
+
+    if auth_enabled:
+        # Build API keys dictionary from environment variables
+        api_keys = {
+            os.getenv('GRAPHITI_API_KEY_ADMIN'): {'user_id': 'admin', 'role': 'admin'},
+            os.getenv('GRAPHITI_API_KEY_READONLY'): {'user_id': 'readonly', 'role': 'readonly'},
+            os.getenv('GRAPHITI_API_KEY_ANALYST'): {'user_id': 'analyst', 'role': 'analyst'},
+        }
+
+        # Filter out None keys (unset environment variables)
+        api_keys = {k: v for k, v in api_keys.items() if k is not None}
+
+        if api_keys:
+            # Initialize authentication service
+            auth_service = AuthService(api_keys)
+
+            # Create and register authentication middleware (FastMCP-compatible)
+            # Per https://gofastmcp.com/servers/middleware
+            auth_middleware = BearerTokenAuthMiddleware(auth_service)
+            server.add_middleware(auth_middleware)
+            logger.info(f'Authentication enabled with {len(api_keys)} API key(s)')
+
+            # 3.6 Configure Authorization (User Story 2)
+            # Add role-based access control using policy file
+            policy_file = os.getenv('EUNOMIA_POLICY_FILE', 'config/mcp_policies.json')
+
+            # Create and register authorization middleware (FastMCP-compatible)
+            authz_middleware = RoleBasedAuthorizationMiddleware(policy_file)
+            server.add_middleware(authz_middleware)
+            logger.info(f'Authorization enabled with policy file: {policy_file}')
+        else:
+            logger.warning('GRAPHITI_AUTH_ENABLED=true but no API keys configured. Authentication disabled.')
+    else:
+        logger.info('Authentication disabled (GRAPHITI_AUTH_ENABLED=false)')
 
     # 4. Register Tools
     # We pass the initialized services into the registration function
@@ -214,6 +256,10 @@ async def create_server() -> FastMCP:
     @server.custom_route('/health', methods=['GET'])
     async def health_check(request):
         return JSONResponse({'status': 'healthy', 'service': 'graphiti-mcp'})
+
+    @server.custom_route('/status', methods=['GET'])
+    async def status_check(request):
+        return JSONResponse({'status': 'ok', 'service': 'graphiti-mcp'})
 
     logger.info('FastMCP server created with factory pattern')
     return server

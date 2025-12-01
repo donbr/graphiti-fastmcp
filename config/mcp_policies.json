@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "policies": [
+    {
+      "role": "admin",
+      "resources": ["*"],
+      "description": "Full access to all MCP tools"
+    },
+    {
+      "role": "readonly",
+      "resources": [
+        "search_nodes",
+        "search_memory_facts",
+        "get_episodes",
+        "get_entity_edge",
+        "get_status"
+      ],
+      "description": "Read-only access to search and retrieve data"
+    },
+    {
+      "role": "analyst",
+      "resources": [
+        "search_nodes",
+        "search_memory_facts",
+        "get_episodes",
+        "get_entity_edge",
+        "get_status",
+        "add_memory"
+      ],
+      "description": "Read access plus ability to add memory episodes"
+    }
+  ]
+}

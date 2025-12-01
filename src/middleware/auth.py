@@ -129,10 +129,23 @@ class BearerTokenAuthMiddleware(Middleware):
         return await call_next(context)
 
     async def on_list_tools(self, context: MiddlewareContext, call_next):
-        """Authenticate before listing tools."""
-        principal = self._authenticate()
-        if context.fastmcp_context:
-            context.fastmcp_context.set_state('api_principal', principal)
+        """
+        Allow tool listing without authentication.
+
+        Tool listings are public API documentation and don't expose sensitive data.
+        This also allows FastMCP Cloud's inspection process to work during deployment.
+        Authorization is still enforced when tools are actually called via on_call_tool.
+        """
+        # Try to authenticate if headers are present, but don't require it
+        try:
+            principal = self._authenticate()
+            if context.fastmcp_context:
+                context.fastmcp_context.set_state('api_principal', principal)
+        except McpError:
+            # Allow unauthenticated tool listing - it's just API documentation
+            logger.debug('Allowing unauthenticated tool listing')
+            pass
+
         return await call_next(context)
 
     async def on_initialize(self, context: MiddlewareContext, call_next):

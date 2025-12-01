@@ -6,7 +6,7 @@
 
 ## Meta-Context
 
-This document captures practical lessons learned during a hands-on research session using the `graphiti-memory` MCP to build a decision-tree knowledge graph for agent memory architectures. These are real-world observations from actually using the tools, complementing the theoretical best practices in `GRAPHITI_BEST_PRACTICES.md`.
+This document captures practical lessons learned during a hands-on research session using the `graphiti-fastmcp` MCP to build a decision-tree knowledge graph for agent memory architectures. These are real-world observations from actually using the tools, complementing the theoretical best practices in `GRAPHITI_BEST_PRACTICES.md`.
 
 **Session Goal**: Research agent memory architectures (Graphiti, A-MEM, GAM, Agent-R, GraphRAG) and capture findings as a queryable decision tree in Graphiti.
 

@@ -19,10 +19,13 @@ This is a Graphiti MCP (Model Context Protocol) Server implementation that expos
 
 ### Four-Layer Architecture
 
-1. **Presentation Layer** (`src/graphiti_mcp_server.py`)
+1. **Presentation Layer** (`src/server.py` - factory pattern, **production entrypoint**)
    - FastMCP-based server exposing Graphiti tools via MCP protocol
+   - Factory pattern initialization (`create_server()`) for clean dependency injection
+   - Closure-based tool registration (no global state)
    - Supports HTTP (default) and stdio transports
    - Tool decorators with type-safe validation
+   - Legacy: `src/graphiti_mcp_server.py` (preserved for backward compatibility)
 
 2. **Services Layer** (`src/services/`)
    - GraphitiService: Client lifecycle management
@@ -183,12 +186,12 @@ FastMCP Cloud is a managed hosting platform that automatically builds and deploy
 **Quick deployment:**
 1. Run verification: `uv run python scripts/verify_fastmcp_cloud_readiness.py`
 2. Visit [fastmcp.cloud](https://fastmcp.cloud) and sign in with GitHub
-3. Create project with entrypoint: `src/graphiti_mcp_server.py:mcp`
+3. Create project with entrypoint: **`src/server.py:create_server`** ⚠️ Use factory pattern entrypoint
 4. Set environment variables in the FastMCP Cloud UI
 5. Deploy (builds automatically from `main` branch)
 
 **Key points:**
-- ✅ FastMCP Cloud uses module-level server instance (already configured)
+- ✅ Uses factory pattern for clean initialization (no global state)
 - ✅ Dependencies auto-detected from `pyproject.toml`
 - ✅ Environment variables set in Cloud UI (NOT `.env` files)
 - ✅ `if __name__ == "__main__"` blocks are IGNORED by FastMCP Cloud
@@ -196,8 +199,17 @@ FastMCP Cloud is a managed hosting platform that automatically builds and deploy
 
 **📖 Full guide:** See [`docs/FASTMCP_CLOUD_DEPLOYMENT.md`](docs/FASTMCP_CLOUD_DEPLOYMENT.md) for complete deployment instructions, troubleshooting, and best practices.
 
+**Local validation before deploying:**
+```bash
+# Static validation
+uv run fastmcp inspect src/server.py:create_server
+
+# Runtime validation (test in browser at http://localhost:6274)
+uv run fastmcp dev src/server.py:create_server
+```
+
 **Self-hosted deployment:**
-For VPS/container deployments, use Docker Compose (see above) or deploy as a standard Python web application with `uv run src/graphiti_mcp_server.py`.
+For VPS/container deployments, use Docker Compose (see above) or deploy as a standard Python web application with `uv run src/server.py`.
 
 ### Environment Variables
 

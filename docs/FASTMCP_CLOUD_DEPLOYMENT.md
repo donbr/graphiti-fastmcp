@@ -42,6 +42,85 @@ All checks should pass before deploying.
 
 ## Deployment Steps
 
+### Step 0: Validate Your Server Locally with FastMCP Tools
+
+**Before deploying to FastMCP Cloud, validate your server with BOTH static and runtime checks.**
+
+#### Static Validation: `fastmcp inspect`
+
+Checks that your server module can be imported and tools are registered:
+
+```bash
+uv run fastmcp inspect src/graphiti_mcp_server.py:mcp
+```
+
+**Expected successful output:**
+
+```
+Name: Graphiti Agent Memory
+Version: <version>
+Tools: 9 found
+  - add_memory: Add an episode to memory
+  - search_nodes: Search for nodes in the graph memory
+  - search_memory_facts: Search the graph memory for relevant facts
+  - get_episodes: Get episodes from the graph memory
+  - get_entity_edge: Get an entity edge from the graph memory by its UUID
+  - delete_episode: Delete an episode from the graph memory
+  - delete_entity_edge: Delete an entity edge from the graph memory
+  - clear_graph: Clear all data from the graph for specified group IDs
+  - get_status: Get the status of the Graphiti MCP server
+```
+
+**Generate JSON report:**
+
+```bash
+# FastMCP-specific format
+uv run fastmcp inspect src/graphiti_mcp_server.py:mcp --format fastmcp -o inspect.json
+
+# MCP protocol format
+uv run fastmcp inspect src/graphiti_mcp_server.py:mcp --format mcp -o inspect-mcp.json
+```
+
+#### Runtime Validation: `fastmcp dev` (ESSENTIAL!)
+
+**The `inspect` command only checks imports - it does NOT catch runtime initialization issues.**
+
+Run the interactive inspector to test actual server initialization:
+
+```bash
+uv run fastmcp dev src/graphiti_mcp_server.py:mcp
+```
+
+This starts your server and opens an interactive web UI at `http://localhost:6274`.
+
+**Critical test in the web UI:**
+
+1. Open `http://localhost:6274` in your browser
+2. Click the "get_status" tool
+3. Click "Execute"
+4. **Expected:** `{"status": "ok", "message": "Graphiti MCP server is running and connected to FalkorDB database"}`
+5. **If you see:** `{"status": "error", "message": "Graphiti service not initialized"}` → **DO NOT DEPLOY**
+
+This error means your server initialization is broken and deployment will fail silently.
+
+**Common issues caught by each tool:**
+
+| Tool | Catches | Example |
+|------|---------|---------|
+| `fastmcp inspect` | Import errors, missing dependencies, invalid entrypoint | `ModuleNotFoundError`, `mcp` object not found |
+| `fastmcp dev` | Runtime initialization issues, database connection failures, missing env vars | "Graphiti service not initialized", connection refused |
+
+**Troubleshooting runtime failures:**
+
+| Issue | Symptom in `fastmcp dev` | Fix |
+|-------|---------|-----|
+| Missing dependencies | Import errors in terminal | Run `uv sync` |
+| Database not running | Connection refused errors | Start FalkorDB/Neo4j (see [CLAUDE.md:86](../CLAUDE.md#L86)) |
+| Missing environment variables | API key errors, config errors | Check `.env` file exists and has required keys |
+| Service initialization failure | `get_status` returns "not initialized" | Check logs in terminal for root cause |
+
+**If EITHER validation fails, do NOT proceed with deployment until errors are fixed.**
+
 ### Step 1: Prepare Your Repository
 
 1. **Ensure `pyproject.toml` is complete**

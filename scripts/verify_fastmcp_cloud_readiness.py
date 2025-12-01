@@ -328,11 +328,14 @@ def generate_deployment_checklist() -> None:
         print(f'  • {BOLD}{var}{RESET}: {desc}')
 
     print(f'\n{BOLD}Next steps:{RESET}\n')
-    print('1. Visit https://fastmcp.cloud')
-    print('2. Sign in with GitHub')
-    print('3. Create a new project from your graphiti-fastmcp repo')
-    print('4. Set environment variables in the FastMCP Cloud UI')
-    print('5. Deploy and test!')
+    print('1. Static validation: uv run fastmcp inspect src/graphiti_mcp_server.py:mcp')
+    print('2. Runtime validation (ESSENTIAL): uv run fastmcp dev src/graphiti_mcp_server.py:mcp')
+    print('   → Test get_status tool in web UI - must return "ok" not "service not initialized"')
+    print('3. Visit https://fastmcp.cloud')
+    print('4. Sign in with GitHub')
+    print('5. Create a new project from your graphiti-fastmcp repo')
+    print('6. Set environment variables in the FastMCP Cloud UI')
+    print('7. Deploy and test!')
 
 
 def main() -> int:

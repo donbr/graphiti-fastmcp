@@ -15,6 +15,31 @@ This is a Graphiti MCP (Model Context Protocol) Server implementation that expos
 > **Quick start**: See `QUICKSTART.md` for a 5-minute introduction.
 > **Version**: Pinned to `graphiti-core==0.24.1` for stability.
 
+## Quick Command Reference
+
+```bash
+# Development
+uv sync                                          # Install dependencies
+docker compose -f docker/docker-compose.yml up   # Start FalkorDB + MCP server
+uv run src/server.py                             # Run server locally
+
+# Testing
+python tests/run_tests.py smoke                  # Quick smoke tests
+python tests/run_tests.py integration --mock-llm # Integration tests (no API key)
+pytest tests/ -m "not slow"                      # Direct pytest
+
+# Linting & Formatting
+uv run ruff format . && uv run ruff check --fix . && uv run pyright
+
+# FastMCP Cloud Validation
+uv run fastmcp inspect src/server.py:create_server    # Static check
+uv run fastmcp dev src/server.py:create_server        # Runtime test (http://localhost:6274)
+
+# Backup/Restore
+uv run scripts/export_graph.py --group-id my_project --output backups/backup.json
+uv run scripts/import_graph.py --input backups/backup.json --group-id my_project
+```
+
 ## Architecture
 
 ### Four-Layer Architecture
@@ -259,21 +284,6 @@ SEMAPHORE_LIMIT=10  # Concurrent episode processing limit
 - **Knowledge graph episodes are stored in plaintext** - treat them as public data
 - **Use `.gitignore`** to protect `backups/` directory containing graph exports
 - **Verify `.gitignore`** before committing: `git check-ignore -v backups/`
-
-Example `.env` structure (see `.env.example` for full template):
-```bash
-# Required - at least one LLM provider
-OPENAI_API_KEY=sk-...
-
-# Database - choose FalkorDB (local/cloud) or Neo4j
-FALKORDB_URI=redis://localhost:6379
-FALKORDB_DATABASE=default_db
-FALKORDB_USER=                    # Required for FalkorDB Cloud
-FALKORDB_PASSWORD=                # Required for FalkorDB Cloud
-
-# Performance tuning
-SEMAPHORE_LIMIT=10               # Adjust based on LLM tier (see Concurrency Control)
-```
 
 ## Testing
 

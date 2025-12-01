@@ -1,584 +1,524 @@
 # Repository Architecture Documentation
 
+> Generated: 2024-11-30 | Graphiti MCP Server Architecture Analysis
+
 ## Overview
 
-The **Graphiti FastMCP Server** is a production-ready MCP (Model Context Protocol) server that exposes knowledge graph functionality for building AI agent memory systems. Built on top of Graphiti Core, it provides a robust API for adding information (episodes), searching entities and relationships, and managing graph data through the standardized MCP protocol.
+This repository implements a **Graphiti MCP Server** - a Model Context Protocol (MCP) server that exposes the Graphiti knowledge graph library as a set of tools for AI agents and applications. The server enables episodic memory storage, entity extraction, relationship mapping, and semantic search over temporal knowledge graphs.
 
-**Key Capabilities:**
-- **Knowledge Graph Memory**: Transform unstructured text, JSON, and messages into a queryable knowledge graph
-- **Multi-Provider Support**: Compatible with OpenAI, Azure OpenAI, Anthropic, Gemini, and Groq for LLMs; OpenAI, Azure, Gemini, and Voyage for embeddings
-- **Flexible Database Backends**: Supports both Neo4j and FalkorDB graph databases
-- **Async Processing**: Queue-based episode processing ensures data consistency while maintaining high throughput
-- **Production-Ready**: HTTP transport, health checks, comprehensive logging, and Docker support
-- **Type-Safe**: Full TypeScript-style type hints and Pydantic validation throughout
+The architecture follows modern Python patterns: **factory-based dependency injection** for flexible provider configuration, **async queue-based processing** for write operations to prevent race conditions, and **layered service architecture** for clean separation of concerns. It supports multiple LLM providers (OpenAI, Azure, Anthropic, Gemini, Groq), embedder providers (OpenAI, Azure, Gemini, Voyage), and graph databases (Neo4j, FalkorDB).
 
-**Architecture Highlights:**
-- Layered architecture with clear separation of concerns
-- Factory pattern for provider abstraction
-- Queue-based processing with sequential guarantees per namespace
-- Configuration-driven design supporting YAML, environment variables, and CLI overrides
-- FastMCP framework for MCP protocol handling
+The system is designed for dual deployment scenarios: **FastMCP Cloud** via the factory pattern in `server.py`, and **local development** with CLI configuration via `graphiti_mcp_server.py`. Both use the same service layer, ensuring consistency across deployment environments.
 
 ## Quick Start
 
 ### Using This Documentation
 
-This architecture documentation is organized to support different exploration needs:
+This documentation set provides comprehensive coverage of the codebase architecture, from high-level system design to detailed API specifications. The documents are organized to support different use cases:
 
-1. **Understanding the System**: Start with this README for the big picture
-2. **Exploring Components**: Use the Component Inventory to find specific files and functions
-3. **Understanding Structure**: Review Architecture Diagrams for visual system layout
-4. **Following Requests**: Check Data Flows to see how operations execute
-5. **API Integration**: Reference the API Reference for detailed tool and configuration documentation
+| Document | Purpose | Best For |
+|----------|---------|----------|
+| [Component Inventory](docs/01_component_inventory.md) | Complete listing of modules, classes, and functions with file locations | Finding specific components, understanding code organization, reference lookup |
+| [Architecture Diagrams](diagrams/02_architecture_diagrams.md) | Visual system architecture with layered views and component relationships | Understanding system design, onboarding new developers, design reviews |
+| [Data Flows](docs/03_data_flows.md) | Sequence diagrams showing request flows, async processing, and error handling | Understanding runtime behavior, debugging, performance optimization |
+| [API Reference](docs/04_api_reference.md) | Complete API documentation with examples, parameters, and return types | Using the MCP tools, integrating with the server, client development |
 
-### Document Index
+**Recommended Reading Order**:
+1. **New to the project**: Start with this README, then Architecture Diagrams, then Data Flows
+2. **Implementing features**: Component Inventory to locate code, then Data Flows for behavior
+3. **Using the API**: API Reference for complete tool documentation and examples
+4. **Debugging issues**: Data Flows for request/error flows, then Component Inventory for code locations
 
-| Document | Description | Use When... |
-|----------|-------------|-------------|
-| [Component Inventory](docs/01_component_inventory.md) | Complete catalog of all modules, classes, and functions with file locations | You need to find where specific functionality is implemented or understand what each file does |
-| [Architecture Diagrams](diagrams/02_architecture_diagrams.md) | Visual representations of system structure, class hierarchies, and component relationships | You want to understand how components interact or visualize the overall system design |
-| [Data Flows](docs/03_data_flows.md) | Detailed sequence diagrams showing request/response lifecycles and message routing | You need to trace how specific operations execute through the system |
-| [API Reference](docs/04_api_reference.md) | Comprehensive API documentation with examples and configuration guides | You're integrating with the server or need detailed parameter information |
+### Key Entry Points
+
+**For Developers**:
+- **Factory Server**: `src/server.py` - Modern entry point using factory pattern (Lines 173-219: `create_server()`)
+- **Legacy Server**: `src/graphiti_mcp_server.py` - Backward-compatible entry point with CLI args
+- **Main Entry**: `main.py` - Wrapper for backward compatibility
+
+**For Configuration**:
+- **YAML Config**: `config/config.yaml` - Main configuration file
+- **Config Schema**: `src/config/schema.py` - Pydantic configuration models
+
+**For Integration**:
+- **MCP Client Example**: `examples/01_connect_and_discover.py` - Connection and tool discovery
+- **Tool Usage Example**: `examples/02_call_tools.py` - Calling MCP tools
+- **Memory Example**: `examples/03_graphiti_memory.py` - Episode operations
 
 ## Architecture Summary
 
-### System Overview
+### System Design
 
-The Graphiti MCP Server implements a **four-layer architecture** that cleanly separates protocol handling, business logic, core integration, and data persistence:
+The system follows a **layered architecture** with clear separation between the MCP protocol layer, service layer, factory layer, and external integrations. This design enables provider flexibility, testability, and deployment portability.
 
+```mermaid
+graph TB
+    subgraph "API Layer"
+        A1[FastMCP Server]
+        A2[MCP Tools<br/>9 tools]
+        A3[Health Routes]
+    end
+
+    subgraph "Service Layer"
+        S1[GraphitiService<br/>Client Lifecycle]
+        S2[QueueService<br/>Episode Processing]
+    end
+
+    subgraph "Factory Layer"
+        F1[LLMClientFactory]
+        F2[EmbedderFactory]
+        F3[DatabaseDriverFactory]
+    end
+
+    subgraph "Configuration"
+        C1[GraphitiConfig<br/>YAML + ENV]
+    end
+
+    subgraph "External Services"
+        E1[Graphiti Core]
+        E2[LLM Providers]
+        E3[Embedder Providers]
+        E4[Graph Database]
+    end
+
+    A1 --> A2
+    A1 --> A3
+    A2 --> S1
+    A2 --> S2
+    S1 --> F1
+    S1 --> F2
+    S1 --> F3
+    F1 --> C1
+    F2 --> C1
+    F3 --> C1
+    F1 --> E2
+    F2 --> E3
+    F3 --> E4
+    S1 --> E1
+    E1 --> E2
+    E1 --> E3
+    E1 --> E4
+
+    style A1 fill:#e1f5ff
+    style S1 fill:#fff4e6
+    style F1 fill:#f3e5f5
+    style F2 fill:#f3e5f5
+    style F3 fill:#f3e5f5
+    style C1 fill:#e8f5e9
 ```
-┌─────────────────────────────────────────────────┐
-│         Presentation Layer (FastMCP)            │  ← MCP protocol, HTTP/SSE/STDIO
-├─────────────────────────────────────────────────┤
-│     Service Layer (Business Logic)              │  ← GraphitiService, QueueService, Factories
-├─────────────────────────────────────────────────┤
-│   Core Integration (Graphiti + AI Providers)    │  ← Graphiti Core, LLM/Embedder clients
-├─────────────────────────────────────────────────┤
-│        Data Layer (Graph Database)              │  ← Neo4j / FalkorDB
-└─────────────────────────────────────────────────┘
-```
 
-**Key Architectural Decisions:**
+**Layer Descriptions**:
 
-1. **MCP Protocol**: Uses FastMCP framework for standardized agent communication, enabling integration with any MCP-compatible client
-2. **Queue-Based Processing**: Episodes are processed asynchronously via per-namespace queues, ensuring sequential consistency while allowing cross-namespace parallelism
-3. **Provider Abstraction**: Factory pattern allows runtime selection of LLM, embedder, and database providers without code changes
-4. **Configuration Composition**: Multi-source configuration (YAML → ENV → CLI) with type-safe validation via Pydantic
+- **API Layer**: FastMCP server exposing 9 MCP tools for knowledge graph operations (add_memory, search_nodes, search_memory_facts, etc.)
+- **Service Layer**: Business logic with GraphitiService (client management) and QueueService (async processing)
+- **Factory Layer**: Provider abstraction creating LLM, embedder, and database clients from configuration
+- **Configuration**: Hierarchical config (CLI > ENV > YAML > Defaults) with environment variable expansion
+- **External Services**: Graphiti Core library integrating with LLM/embedder/database providers
 
-### Layered Architecture
+### Design Patterns
 
-#### Layer 1: Presentation (MCP Interface)
-- **Location**: `src/graphiti_mcp_server.py` (lines 148-756)
-- **Components**: FastMCP server instance, tool decorators, HTTP/SSE/STDIO transports
-- **Responsibility**: Handle MCP protocol messages, route to appropriate handlers, serialize responses
-- **Key Pattern**: Decorator-based tool registration with `@mcp.tool()`
+The architecture employs several key design patterns:
 
-#### Layer 2: Service (Business Logic)
-- **Location**:
-  - GraphitiService: `src/graphiti_mcp_server.py` (lines 162-321)
-  - QueueService: `src/services/queue_service.py`
-  - Factories: `src/services/factories.py`
-- **Components**: Service classes, factory classes, queue management
-- **Responsibility**: Orchestrate Graphiti operations, manage client lifecycle, handle async processing
-- **Key Patterns**: Service pattern, factory pattern, queue-based async processing
+1. **Factory Pattern**: Used for creating provider-specific clients (LLM, Embedder, Database) based on configuration. Enables runtime provider selection and clean dependency injection.
+   - `LLMClientFactory.create()` - Creates OpenAI, Azure, Anthropic, Gemini, or Groq clients
+   - `EmbedderFactory.create()` - Creates OpenAI, Azure, Gemini, or Voyage embedders
+   - `DatabaseDriverFactory.create_config()` - Creates Neo4j or FalkorDB configurations
 
-#### Layer 3: Core Integration (AI & Graph Engine)
-- **Location**: Graphiti Core library (external), provider SDKs (OpenAI, Anthropic, etc.)
-- **Components**: Graphiti client, LLM clients, embedder clients, database drivers
-- **Responsibility**: Execute knowledge graph operations, perform entity extraction, generate embeddings
-- **Key Pattern**: Client wrapper pattern with factory creation
+2. **Service Pattern**: Encapsulates business logic in service classes with dependency injection
+   - `GraphitiService` - Manages Graphiti client lifecycle and initialization
+   - `QueueService` - Manages async episode processing with per-group_id queues
 
-#### Layer 4: Data (Persistence)
-- **Location**: External databases (Neo4j or FalkorDB)
-- **Components**: Graph database instances
-- **Responsibility**: Store and query nodes, edges, and embeddings
-- **Key Pattern**: Driver abstraction via configuration
+3. **Closure-Based Dependency Injection**: Tool handlers capture service instances via closures, enabling factory pattern without global state
+   - Critical for FastMCP Cloud deployment which requires factory-based server creation
+   - Tools defined in `_register_tools()` capture `graphiti_svc`, `queue_svc`, `cfg`
 
-### Key Design Patterns
+4. **Queue Pattern**: Async processing with sequential guarantees per group_id
+   - Prevents race conditions in knowledge graph updates
+   - Different groups process in parallel
+   - Background workers with proper error isolation
 
-1. **Factory Pattern** (`src/services/factories.py`)
-   - Creates provider-specific LLM, embedder, and database clients
-   - Enables runtime provider selection
-   - Centralizes provider-specific configuration logic
+5. **Configuration Hierarchy**: Pydantic Settings with multiple sources
+   - Priority: CLI args > Environment variables > YAML config > Defaults
+   - Environment variable expansion in YAML: `${VAR}` and `${VAR:default}`
 
-2. **Service Pattern** (GraphitiService, QueueService)
-   - Encapsulates complex initialization and lifecycle management
-   - Provides clean interface for MCP tools
-   - Manages stateful resources (Graphiti client, queues)
+### Technology Stack
 
-3. **Queue-Based Async Processing** (`src/services/queue_service.py`)
-   - Per-namespace queues ensure sequential processing within a namespace
-   - Allows concurrent processing across different namespaces
-   - Non-blocking API returns immediately while processing in background
+**Core Framework**:
+- **FastMCP** - MCP server framework with JSON-RPC 2.0 over HTTP/stdio
+- **Graphiti Core** - Knowledge graph library with temporal fact support
+- **Pydantic v2** - Data validation, settings management, and schema generation
 
-4. **Configuration Composition** (`src/config/schema.py`)
-   - Hierarchical configuration with clear precedence: CLI → ENV → YAML → Defaults
-   - Environment variable expansion in YAML: `${VAR:default}`
-   - Type-safe validation with Pydantic
+**Async Processing**:
+- **AsyncIO** - Async/await for concurrent operations
+- **asyncio.Queue** - Per-group_id queues for sequential processing
 
-5. **Decorator-Based Tool Registration**
-   - Tools exposed via `@mcp.tool()` decorators
-   - FastMCP handles argument validation and response serialization
-   - Self-documenting API with type hints and docstrings
+**LLM Providers** (configurable):
+- OpenAI (gpt-4.1, gpt-4.1-mini, gpt-5, o1, o3)
+- Azure OpenAI (all models, with Azure AD support)
+- Anthropic (Claude 3 models)
+- Google Gemini (gemini-pro, gemini-ultra)
+- Groq (llama, mixtral models)
 
-6. **Response Type Standardization** (`src/models/response_types.py`)
-   - Consistent response structures across all tools
-   - TypedDict for type safety without runtime overhead
-   - Clear success/error response patterns
+**Embedder Providers** (configurable):
+- OpenAI (text-embedding-3-small/large)
+- Azure OpenAI (text-embedding-3-small/large)
+- Google Gemini (text-embedding-004)
+- Voyage AI (voyage-3, voyage-3-lite)
+
+**Graph Databases** (configurable):
+- Neo4j - Property graph database (bolt protocol)
+- FalkorDB - Redis-based graph database
+
+**Development**:
+- Python 3.10+
+- pytest for testing
+- ruff for linting
 
 ## Component Overview
 
-### Core Components
+### Public API (MCP Tools)
 
-**Main Server** (`src/graphiti_mcp_server.py`)
-- FastMCP server with 9 MCP tools for graph operations
-- GraphitiService for client lifecycle management
-- Global configuration and service initialization
-- Entry point and server startup logic
+The server exposes 9 tools through the Model Context Protocol:
 
-**Configuration System** (`src/config/`)
-- `schema.py`: Pydantic configuration models with YAML support
-- YamlSettingsSource: Custom settings source with environment variable expansion
-- Multi-layered config hierarchy with provider-specific settings
+| Tool | Purpose | Async |
+|------|---------|-------|
+| add_memory | Add episodes (text, JSON, messages) to knowledge graph | Yes (queued) |
+| search_nodes | Search for entities using natural language | No (sync) |
+| search_memory_facts | Search for relationship facts between entities | No (sync) |
+| get_episodes | Retrieve episodes from knowledge graph | No (sync) |
+| get_entity_edge | Retrieve specific relationship edge by UUID | No (sync) |
+| delete_entity_edge | Delete relationship edge by UUID | No (sync) |
+| delete_episode | Delete episode by UUID | No (sync) |
+| clear_graph | Clear all data for specified group IDs | No (sync) |
+| get_status | Health check for server and database | No (sync) |
 
-**Services** (`src/services/`)
-- `factories.py`: LLMClientFactory, EmbedderFactory, DatabaseDriverFactory
-- `queue_service.py`: QueueService for async episode processing
+**Key Characteristics**:
+- All tools registered via `@server.tool()` decorator
+- Type hints auto-generate JSON Schema for MCP protocol
+- Tools return TypedDict responses (ErrorResponse, SuccessResponse, etc.)
+- Write operations queue work, read operations execute synchronously
 
-**Models** (`src/models/`)
-- `entity_types.py`: Custom entity type definitions (Requirement, Preference, etc.)
-- `response_types.py`: TypedDict response structures
+**Source**: `src/server.py` (Lines 230-455)
 
-**Utilities** (`src/utils/`)
-- `formatting.py`: Response formatting with embedding exclusion
-- `utils.py`: Azure AD authentication helpers
+### Core Services
 
-### Public API Surface
+**GraphitiService** (`src/server.py:88-168`):
+- Manages Graphiti client lifecycle and initialization
+- Uses factories to create LLM, embedder, and database clients
+- Builds custom entity types from configuration
+- Provides `get_client()` for tool handlers
+- Initializes database indices and constraints
 
-**9 MCP Tools** (exposed via FastMCP):
-1. `add_memory` - Add episodes to the knowledge graph (async queue-based)
-2. `search_nodes` - Search for entities using hybrid search
-3. `search_memory_facts` - Search for relationships/edges
-4. `get_entity_edge` - Retrieve specific edge by UUID
-5. `get_episodes` - Retrieve episodes by group ID
-6. `delete_entity_edge` - Delete specific edge
-7. `delete_episode` - Delete specific episode
-8. `clear_graph` - Clear all data for specified namespaces
-9. `get_status` - Health check and database connectivity status
+**QueueService** (`src/services/queue_service.py:12-153`):
+- Manages sequential episode processing per group_id
+- Maintains separate asyncio.Queue for each group
+- One background worker per group ensures sequential processing
+- Prevents race conditions in knowledge graph updates
+- Error isolation - worker errors don't crash other workers
 
-**HTTP Endpoint**:
-- `/health` - Non-MCP health check for load balancers
+### Factory System
 
-**Configuration Classes**:
-- GraphitiConfig, ServerConfig, LLMConfig, EmbedderConfig, DatabaseConfig
-- Provider-specific configs for each supported service
+**LLMClientFactory** (`src/services/factories.py:100-251`):
+- Creates LLM clients based on configuration provider
+- Supports: openai, azure_openai, anthropic, gemini, groq
+- Handles API key validation
+- Special logic for reasoning models (gpt-5, o1, o3)
+- Azure AD authentication support
 
-### Internal Services
+**EmbedderFactory** (`src/services/factories.py:253-361`):
+- Creates embedder clients for vector generation
+- Supports: openai, azure_openai, gemini, voyage
+- Configurable embedding dimensions
+- API key validation
 
-**GraphitiService**
-- Initializes and manages Graphiti Core client
-- Coordinates LLM, embedder, and database client creation via factories
-- Provides `get_client()` for lazy initialization
-- Handles connection errors with helpful provider-specific messages
+**DatabaseDriverFactory** (`src/services/factories.py:363-440`):
+- Creates database configuration dictionaries
+- Supports: neo4j, falkordb
+- Environment variable overrides for connection strings
+- URI parsing for host/port extraction
 
-**QueueService**
-- Manages per-namespace asyncio queues
-- Spawns worker tasks for each active namespace
-- Ensures sequential episode processing per group_id
-- Provides queue monitoring (size, worker status)
+### Configuration
 
-**Factory Classes**
-- Runtime provider selection based on configuration
-- Conditional imports for optional dependencies
-- API key validation and logging
-- Special handling for reasoning models (GPT-5, o1, o3)
+**GraphitiConfig** (`src/config/schema.py:230-293`):
+- Main configuration class using Pydantic BaseSettings
+- Nested configs: ServerConfig, LLMConfig, EmbedderConfig, DatabaseConfig, GraphitiAppConfig
+- Loads from YAML with environment variable expansion
+- Priority: CLI > ENV > YAML > Defaults
+- Custom YamlSettingsSource for `${VAR}` expansion
+
+**Configuration Hierarchy**:
+```
+CLI Arguments → Environment Variables → YAML File → Default Values
+```
 
 ## Data Flows
 
-### Primary Flows
+### Key Flow Patterns
 
-#### 1. Episode Addition Flow (Async Write)
-```
-Client → MCP Tool → Validate → Queue → Return Success
-                                  ↓
-                            Background Worker → Graphiti → LLM → Embedder → Database
-```
+The system implements distinct patterns for different operation types:
 
-**Characteristics**:
-- Non-blocking: Client receives success response immediately
-- Sequential per namespace: Episodes for same group_id processed in order
-- Concurrent across namespaces: Different group_ids processed in parallel
-- Semaphore-limited: Controlled concurrency to avoid rate limits
+1. **Query Flow** (Synchronous):
+   - Client → HTTP Transport → FastMCP → Tool Handler → GraphitiService → Graphiti Core → Database
+   - Direct path with immediate response
+   - Used for: search_nodes, search_memory_facts, get_episodes, get_status
+   - Hybrid search: Vector similarity + keyword matching with RRF scoring
 
-**File References**:
-- Tool handler: `src/graphiti_mcp_server.py:323-407`
-- Queue service: `src/services/queue_service.py:101-153`
+2. **Episode Addition Flow** (Asynchronous):
+   - Client → HTTP Transport → FastMCP → add_memory Tool → QueueService → Queue
+   - Immediate SuccessResponse to client (async processing)
+   - Background Worker → process_episode → Graphiti Core → LLM (entity extraction) → Embedder → Database
+   - Sequential processing per group_id prevents race conditions
 
-#### 2. Search Flow (Sync Read)
-```
-Client → MCP Tool → GraphitiService → Graphiti Client → Embedder → Database
-                                                                      ↓
-Client ← Formatted Response ← Remove Embeddings ← Search Results ← Hybrid Search
-```
+3. **Client Session Flow** (Initialization):
+   - Connection establishment via streamablehttp_client
+   - MCP protocol handshake (initialize)
+   - Tool discovery (list_tools)
+   - Tool invocation (tools/call)
+   - Proper cleanup with async context managers
 
-**Characteristics**:
-- Synchronous: Blocks until results are returned
-- Hybrid search: Combines vector similarity and keyword matching
-- Filtered results: Embeddings removed to reduce payload size
-- Namespace-aware: Respects group_id boundaries
+**Detailed Diagrams**: See [Data Flows Documentation](docs/03_data_flows.md) for complete sequence diagrams
 
-**File References**:
-- search_nodes: `src/graphiti_mcp_server.py:410-486`
-- search_memory_facts: `src/graphiti_mcp_server.py:490-540`
+### Async Processing
 
-#### 3. Initialization Flow
-```
-main.py → initialize_server() → Load Config (YAML + ENV + CLI)
-                                      ↓
-                              Create GraphitiService
-                                      ↓
-                              Factories → Create LLM, Embedder, DB Clients
-                                      ↓
-                              Initialize Graphiti Client
-                                      ↓
-                              Build Database Indices
-                                      ↓
-                              Initialize QueueService
-                                      ↓
-                              Start MCP Server
-```
+The queue-based async processing architecture ensures data consistency:
 
-**File Reference**: `src/graphiti_mcp_server.py:764-907`
+**Architecture**:
+- Separate `asyncio.Queue` for each group_id
+- Long-lived background worker per queue
+- Sequential processing within a group (prevents conflicts)
+- Parallel processing across different groups (scalability)
 
-### Request/Response Lifecycle
+**Processing Pipeline** (inside Graphiti Core):
+1. LLM extracts entities and relationships from episode
+2. Embedder generates vectors for entities and facts
+3. Semantic deduplication merges similar entities
+4. Database writes: EpisodicNode, EntityNodes, EntityEdges
+5. RELATES_TO edges connect episode to extracted entities
 
-**MCP Request Processing**:
-1. HTTP POST to `/mcp/` with JSON-RPC payload
-2. FastMCP parses request and extracts tool name + arguments
-3. Argument validation against function signature (Pydantic)
-4. Route to appropriate tool handler
-5. Execute business logic (GraphitiService or QueueService)
-6. Format response (exclude embeddings, serialize dates)
-7. Wrap in CallToolResult and serialize to JSON-RPC
-8. Return HTTP response
+**Error Handling**:
+- Worker errors logged but don't crash other workers
+- Failed episodes marked complete (no retry)
+- Client already received success (monitoring required)
 
-**Error Handling Path**:
-- Try/catch blocks in all tools
-- Errors logged with context
-- ErrorResponse returned to client
-- Service continues processing (fails gracefully)
+## Key Insights
 
-## Key Configuration
+### Architectural Strengths
 
-### Quick Configuration Guide
+1. **Provider Flexibility**: Factory pattern enables runtime provider selection without code changes. Swap OpenAI for Anthropic or Neo4j for FalkorDB via configuration.
 
-**Most Important Settings**:
+2. **Deployment Portability**: Dual entry points (factory-based and legacy) support both FastMCP Cloud deployment and local development with same service layer.
 
-```yaml
-# config/config.yaml
-server:
-  transport: "http"        # Use 'http' for production, 'stdio' for local testing
-  host: "0.0.0.0"
-  port: 8000
+3. **Data Consistency**: Queue-based processing with sequential guarantees per group_id prevents concurrent modification issues in the knowledge graph.
 
-llm:
-  provider: "openai"       # openai | azure_openai | anthropic | gemini | groq
-  model: "gpt-5-mini"
-  providers:
-    openai:
-      api_key: ${OPENAI_API_KEY}
+4. **Clean Separation**: Layered architecture with clear boundaries enables independent testing of API, service, and factory layers.
 
-embedder:
-  provider: "openai"       # openai | azure_openai | gemini | voyage
-  model: "text-embedding-3-small"
-  providers:
-    openai:
-      api_key: ${OPENAI_API_KEY}
+5. **Protocol Abstraction**: FastMCP handles all MCP protocol complexity (JSON-RPC, schema generation, serialization), allowing tool developers to focus on business logic.
 
-database:
-  provider: "falkordb"     # falkordb | neo4j
-  providers:
-    falkordb:
-      uri: ${FALKORDB_URI:redis://localhost:6379}
-      database: ${FALKORDB_DATABASE:default_db}
+### Integration Points
 
-graphiti:
-  group_id: "main"         # Default namespace for graph data
-```
+**LLM Providers**:
+- OpenAI: Direct API or Azure deployment
+- Anthropic: Claude models via direct API
+- Google: Gemini models with optional project_id
+- Groq: Fast inference for llama/mixtral
+- All use conditional imports for optional dependencies
 
-### Environment Variables (Essential)
+**Embedder Providers**:
+- OpenAI: text-embedding-3-small (1536d) or large (3072d)
+- Azure OpenAI: Same models via Azure deployment
+- Google Gemini: text-embedding-004 (768d)
+- Voyage AI: voyage-3 (1024d) or lite (512d)
 
-**Required for Operation**:
-```bash
-# LLM Provider
-export OPENAI_API_KEY="sk-..."                    # For OpenAI
-# OR
-export ANTHROPIC_API_KEY="sk-ant-..."            # For Anthropic
-# OR
-export GOOGLE_API_KEY="..."                       # For Gemini
+**Graph Databases**:
+- Neo4j: Bolt protocol, full Cypher support
+- FalkorDB: Redis-based, subset of Cypher
+- Both support temporal facts and hybrid search
 
-# Database (if not using defaults)
-export FALKORDB_URI="redis://localhost:6379"      # For FalkorDB
-# OR
-export NEO4J_URI="bolt://localhost:7687"          # For Neo4j
-export NEO4J_PASSWORD="password"
+**Configuration Sources**:
+- Environment variables: Direct override (prefixed with section, e.g., `LLM__PROVIDER`)
+- YAML files: Structured config with `${VAR}` expansion
+- CLI arguments: Runtime overrides for local development
+- Defaults: Sensible defaults in Pydantic models
+
+### Extensibility
+
+**Adding New LLM Providers**:
+1. Add provider config class to `src/config/schema.py` (e.g., `OllamaConfig`)
+2. Add to `LLMProvidersConfig` as nested field
+3. Add case to `LLMClientFactory.create()` match statement
+4. Import provider client from graphiti_core (conditional import)
+5. Update YAML config and documentation
+
+**Adding New Entity Types**:
+1. Define Pydantic model in `src/models/entity_types.py`
+2. Add to `ENTITY_TYPES` dictionary
+3. Add to YAML config `graphiti.entity_types` with description
+4. LLM will use description for entity extraction
+
+**Adding New MCP Tools**:
+1. Define tool function in `_register_tools()` with `@server.tool()` decorator
+2. Use type hints for auto-generated JSON Schema
+3. Return TypedDict response (SuccessResponse, ErrorResponse, or custom)
+4. Capture service instances via closure
+5. Add to API documentation
+
+**Custom Health Checks**:
+1. Add route to FastMCP via `@server.custom_route()`
+2. Return JSON response for monitoring
+3. Example: `/health` endpoint returns `{"status": "healthy"}`
+
+## File Structure
+
 ```
 
-**Performance Tuning**:
-```bash
-# Concurrency control (tune based on LLM rate limits)
-export SEMAPHORE_LIMIT=10  # Default: 10, adjust based on provider tier
-
-# OpenAI Tier 1 (free): Use 1
-# OpenAI Tier 3: Use 10
-# Anthropic high tier: Use 20
+├── src/
+│   ├── server.py                    # Factory-based entry point (FastMCP Cloud)
+│   ├── graphiti_mcp_server.py       # Legacy entry point (local dev)
+│   ├── config/
+│   │   └── schema.py                # Configuration models (GraphitiConfig)
+│   ├── services/
+│   │   ├── factories.py             # Provider factories (LLM, Embedder, Database)
+│   │   └── queue_service.py         # Async episode processing
+│   ├── models/
+│   │   ├── response_types.py        # TypedDict responses for MCP tools
+│   │   └── entity_types.py          # Custom Pydantic entity models
+│   └── utils/
+│       ├── formatting.py            # Node/edge formatting utilities
+│       └── utils.py                 # Azure AD authentication
+├── config/
+│   └── config.yaml                  # Main configuration file
+├── examples/
+│   ├── 01_connect_and_discover.py   # MCP client connection
+│   ├── 02_call_tools.py             # Tool invocation examples
+│   ├── 03_graphiti_memory.py        # Memory operations
+│   └── 04_mcp_concepts.py           # MCP concepts demo
+├── scripts/
+│   ├── check_falkordb_health.py     # Database health checks
+│   ├── populate_meta_knowledge.py   # Seed knowledge graph
+│   ├── export_graph.py              # Data export
+│   └── import_graph.py              # Data import
+├── tests/                           # Test suite (13 test files)
+├── main.py                          # Backward-compatible wrapper
+└── README.md                        # Main project README
 ```
 
-**Configuration Priority** (highest to lowest):
-1. CLI arguments (`--llm-provider openai`)
-2. Environment variables (`LLM__PROVIDER=openai`)
-3. YAML configuration file
-4. Pydantic defaults
-
-## Getting Started with the Codebase
-
-### Entry Points
-
-**Primary Entry Point**:
-- `main.py:23` - Wrapper that calls graphiti_mcp_server.main()
-
-**Core Server Entry Point**:
-- `src/graphiti_mcp_server.py:954` - Main server entry point with asyncio.run()
-
-**Example Scripts** (Client-side usage):
-- `examples/01_connect_and_discover.py` - MCP connection and service discovery
-- `examples/02_call_tools.py` - Calling MCP tools
-- `examples/03_graphiti_memory.py` - Memory operations demo
-- `examples/export_graph.py` - Export graph data to JSON
-- `examples/import_graph.py` - Import graph data from JSON
-
-### Key Files to Understand
-
-**Tier 1: Core Server Logic**
-1. `src/graphiti_mcp_server.py` (967 lines)
-   - MCP tool definitions (lines 323-756)
-   - GraphitiService class (lines 162-321)
-   - Server initialization (lines 764-907)
-   - Transport handling (lines 910-951)
-
-**Tier 2: Configuration & Models**
-2. `src/config/schema.py` (293 lines)
-   - Configuration class hierarchy
-   - YAML settings source with env var expansion (lines 16-74)
-   - Provider configurations
-
-3. `src/models/response_types.py` (44 lines)
-   - Response type definitions for all MCP tools
-
-**Tier 3: Business Logic**
-4. `src/services/factories.py` (440 lines)
-   - LLMClientFactory (lines 100-251)
-   - EmbedderFactory (lines 253-361)
-   - DatabaseDriverFactory (lines 363-440)
-
-5. `src/services/queue_service.py` (153 lines)
-   - QueueService for async episode processing
-   - Per-namespace queue management
-
-**Tier 4: Utilities**
-6. `src/utils/formatting.py` (51 lines)
-   - Response formatting helpers
-   - Embedding exclusion logic
-
-### Recommended Reading Order
-
-1. **Start with Configuration** (`src/config/schema.py`)
-   - Understand how the system is configured
-   - See what providers are supported
-   - Learn the configuration hierarchy
-
-2. **Read Response Types** (`src/models/response_types.py`)
-   - Quick overview of API response structures
-   - Understand success/error patterns
-
-3. **Explore MCP Tools** (`src/graphiti_mcp_server.py:323-756`)
-   - See the public API surface
-   - Understand tool signatures and behavior
-   - Follow the code flow for one tool (e.g., `search_nodes`)
-
-4. **Study GraphitiService** (`src/graphiti_mcp_server.py:162-321`)
-   - Understand client initialization
-   - See how factories are used
-   - Learn error handling patterns
-
-5. **Examine Factories** (`src/services/factories.py`)
-   - Understand provider abstraction
-   - See conditional imports
-   - Learn special handling for different providers
-
-6. **Review QueueService** (`src/services/queue_service.py`)
-   - Understand async processing model
-   - See queue management logic
-   - Learn worker task lifecycle
-
-7. **Check Examples** (`examples/`)
-   - See client-side usage patterns
-   - Understand MCP protocol interaction
-   - Learn best practices
-
-## Architecture Decisions
-
-### Why MCP?
-
-**Model Context Protocol (MCP)** provides a standardized way for AI agents to access external context and tools:
-
-- **Standardization**: Works with any MCP-compatible client (Claude Desktop, custom agents, etc.)
-- **Tool Discovery**: Clients can discover available tools programmatically
-- **Type Safety**: Structured arguments and responses with validation
-- **Transport Flexibility**: HTTP for production, STDIO for local development
-- **Future-Proof**: Industry standard backed by Anthropic and growing ecosystem
-
-**Alternative Considered**: Custom REST API
-- **Rejected Because**: Non-standard, requires custom client code, no built-in tool discovery
-
-### Why Queue-Based Processing?
-
-**Problem**: Race conditions when multiple episodes modify the same graph entities concurrently
-
-**Solution**: Sequential processing per namespace via asyncio queues
-
-**Benefits**:
-- **Consistency**: Episodes for same group_id processed in order
-- **Performance**: Different group_ids processed in parallel
-- **Non-Blocking**: API returns immediately, processing happens in background
-- **Scalability**: Worker tasks spawned on-demand per namespace
-
-**Trade-offs**:
-- Episodes not immediately visible in graph (eventual consistency)
-- No direct feedback on processing errors (already returned success)
-- Queue buildup if processing slower than ingestion
-
-**Tuning**: SEMAPHORE_LIMIT controls max concurrent Graphiti operations (see `src/graphiti_mcp_server.py:49-76`)
-
-### Provider Abstraction
-
-**Problem**: Support multiple LLM, embedder, and database providers without code duplication
-
-**Solution**: Factory pattern with runtime provider selection
-
-**Benefits**:
-- **Flexibility**: Switch providers via configuration
-- **Extensibility**: Add new providers by extending factory
-- **Testability**: Easy to mock providers for testing
-- **Cost Optimization**: Choose providers based on cost/performance
-
-**Implementation**:
-- Factories at `src/services/factories.py`
-- Conditional imports for optional dependencies
-- Provider-specific configuration nested under main config
-- Special handling for provider quirks (e.g., reasoning models)
+**Key Directories**:
+- `src/`: Source code with layered architecture
+- `config/`: YAML configuration files
+- `examples/`: Client integration examples
+- `scripts/`: Utility scripts for ops
+- `tests/`: Pytest test suite
+- `ra_output/`: Architecture documentation (this folder)
 
 ## References
 
-### Internal Documentation
+### Detailed Documentation
 
-- **[Component Inventory](docs/01_component_inventory.md)**: Complete catalog of modules, classes, functions, and their locations
-- **[Architecture Diagrams](diagrams/02_architecture_diagrams.md)**: Visual representations of system structure, class hierarchies, dependencies, and data flows
-- **[Data Flows](docs/03_data_flows.md)**: Detailed sequence diagrams for query operations, session management, tool permissions, server communication, and message routing
-- **[API Reference](docs/04_api_reference.md)**: Comprehensive API documentation with examples, configuration guides, and best practices
+- **[Component Inventory](docs/01_component_inventory.md)** - Complete module, class, and function listing with file locations and line numbers. Use for code navigation and reference lookup.
+
+- **[Architecture Diagrams](diagrams/02_architecture_diagrams.md)** - Visual system architecture including layered view, component relationships, class hierarchies, module dependencies, and deployment patterns.
+
+- **[Data Flows](docs/03_data_flows.md)** - Sequence diagrams and detailed explanations of query flow, episode addition flow, client session flow, tool registration, MCP communication, message routing, and error handling.
+
+- **[API Reference](docs/04_api_reference.md)** - Complete API documentation for all 9 MCP tools, service classes, factory classes, configuration, data models, entity types, and utility functions with examples.
 
 ### External Resources
 
-- **[Graphiti Core](https://github.com/getzep/graphiti)**: Underlying knowledge graph library
-- **[FastMCP](https://github.com/jlowin/fastmcp)**: MCP server framework
-- **[Model Context Protocol](https://modelcontextprotocol.io/)**: MCP specification and documentation
-- **[Neo4j](https://neo4j.com/)**: Neo4j graph database
-- **[FalkorDB](https://www.falkordb.com/)**: FalkorDB (Redis-based graph database)
+**Core Dependencies**:
+- [Graphiti Core](https://github.com/getzep/graphiti-core) - Knowledge graph library with temporal fact support
+- [FastMCP](https://github.com/jlowin/fastmcp) - FastMCP server framework for Model Context Protocol
+- [MCP Specification](https://modelcontextprotocol.io/) - Model Context Protocol specification and documentation
+- [Pydantic](https://docs.pydantic.dev/) - Data validation and settings management
 
-### Configuration Examples
+**LLM Provider SDKs**:
+- [OpenAI Python SDK](https://github.com/openai/openai-python)
+- [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python)
+- [Google Generative AI SDK](https://github.com/google/generative-ai-python)
 
-- **[Sample Config](../../../config/config.yaml)**: Production-ready configuration template
-- **[Environment Variables](docs/04_api_reference.md#environment-variables-essential)**: Complete list of supported environment variables
+**Database Drivers**:
+- [Neo4j Python Driver](https://neo4j.com/docs/python-manual/current/)
+- [FalkorDB Python Client](https://github.com/FalkorDB/FalkorDB-Python)
+
+**Development Tools**:
+- [pytest](https://docs.pytest.org/) - Testing framework
+- [ruff](https://github.com/astral-sh/ruff) - Linting and formatting
 
 ## Contributing
 
-### Understanding the Architecture
+### Documentation Maintenance
 
-**For New Contributors**:
+This architecture documentation was **auto-generated** by analyzing the codebase structure, imports, and implementation patterns. The documentation is organized into:
 
-1. **Read This README First**: Get the big picture and architectural context
-2. **Review Architecture Diagrams**: Understand visual system layout
-3. **Study One Data Flow**: Pick a flow (e.g., search) and trace it end-to-end
-4. **Read Related Code**: Follow the recommended reading order above
-5. **Run Examples**: Execute client examples to see the system in action
-6. **Check Tests**: Look at test files to understand expected behavior
+- **Component Inventory**: Extracted from module structure and docstrings
+- **Architecture Diagrams**: Generated from import dependencies and class relationships
+- **Data Flows**: Derived from async patterns and request handling code
+- **API Reference**: Built from function signatures, type hints, and docstrings
 
-**Key Principles**:
-- **Separation of Concerns**: Each layer has clear responsibilities
-- **Type Safety**: Use type hints and Pydantic validation
-- **Error Handling**: Always catch exceptions and return ErrorResponse
-- **Logging**: Log important operations and errors
-- **Documentation**: Update docstrings and architecture docs
+**To Update Documentation**:
+1. Modify source code with clear docstrings and type hints
+2. Re-run the architecture analysis tool
+3. Review generated documentation for accuracy
+4. Commit both code and documentation changes
 
-### Where to Add New Features
+**Documentation Standards**:
+- All public APIs should have docstrings with parameter descriptions
+- Type hints should be complete for auto-schema generation
+- Example usage in docstrings improves API documentation quality
+- Architectural decisions should be documented in code comments
 
-**Adding a New MCP Tool**:
-1. Define in `src/graphiti_mcp_server.py` with `@mcp.tool()` decorator
-2. Add response type to `src/models/response_types.py`
-3. Update API reference documentation
-4. Add example usage to `examples/`
+### Development Workflow
 
-**Adding a New Provider**:
-1. Add provider config to `src/config/schema.py`
-2. Extend appropriate factory in `src/services/factories.py`
-3. Add environment variables to YAML template
-4. Document in API reference
-
-**Adding Configuration Options**:
-1. Add field to appropriate config class in `src/config/schema.py`
-2. Update YAML template in `config/config.yaml`
-3. Add CLI argument in `initialize_server()` if needed
-4. Document in API reference
-
-**Adding Custom Entity Types**:
-1. Define in `src/models/entity_types.py` (or via config)
-2. Add to YAML configuration under `graphiti.entity_types`
-3. Document usage in API reference
-
-**Modifying Data Flows**:
-1. Update sequence diagrams in `ra_output/architecture_20251127_152442/docs/03_data_flows.md`
-2. Update architecture diagrams if component relationships change
-3. Update this README if architectural decisions change
-
-### Testing Your Changes
-
-**Run Tests**:
+**Setup**:
 ```bash
-python tests/run_tests.py unit          # Unit tests
-python tests/run_tests.py integration   # Integration tests
-python tests/run_tests.py all          # All tests
+# Clone repository
+git clone <repository-url>
+cd graphiti-fastmcp
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+
+# Install dependencies
+pip install -e .
+
+# Copy and configure
+cp config/config.yaml.example config/config.yaml
+# Edit config.yaml with your API keys and database settings
 ```
 
-**Manual Testing**:
+**Testing**:
 ```bash
-# Start server
-python main.py
+# Run test suite
+pytest tests/
 
-# In another terminal, run examples
-python examples/01_connect_and_discover.py
-python examples/02_call_tools.py
+# Run specific test file
+pytest tests/test_server.py
+
+# Run with coverage
+pytest --cov=src tests/
+```
+
+**Local Development**:
+```bash
+# Run server with HTTP transport
+python src/server.py
+
+# Or use legacy entry point with CLI args
+python src/graphiti_mcp_server.py --transport http --port 8000
+```
+
+**Code Quality**:
+```bash
+# Run linter
+ruff check src/
+
+# Auto-fix issues
+ruff check --fix src/
+
+# Format code
+ruff format src/
 ```
 
 ---
 
-**Generated**: 2024-11-27
-
-**Documentation Covers**:
-- System architecture and design patterns
-- Component inventory and relationships
-- Data flows and request lifecycles
-- Complete API reference with examples
-- Configuration options and best practices
-- Getting started guide for contributors
-
-**Maintained By**: Architecture documentation is generated from source code analysis and should be updated when significant architectural changes are made.
+*This documentation was generated by analyzing the Graphiti MCP Server codebase on 2024-11-30. For the most up-to-date information, refer to the source code and inline documentation.*

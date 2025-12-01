@@ -1,304 +1,355 @@
 # Architecture Diagrams
 
-## System Architecture
+## Overview
 
-### Overview
-The Graphiti MCP Server is built on a layered architecture that separates concerns between presentation (MCP server interface), business logic (services and factories), data access (Graphiti Core integration), and configuration management. The system uses the Model Context Protocol (MCP) to expose knowledge graph functionality through a FastMCP server, which can operate via HTTP, SSE, or STDIO transports.
+The Graphiti MCP Server is a FastMCP-based implementation that exposes the Graphiti knowledge graph library through the Model Context Protocol. The architecture follows a layered design with clear separation between API, service, configuration, and data model layers. It employs the Factory Pattern for dependency injection and supports multiple LLM/embedder/database providers.
 
-The architecture follows these key principles:
-- **Separation of Concerns**: Clear boundaries between configuration, services, models, and utilities
-- **Factory Pattern**: Abstraction of LLM, Embedder, and Database client creation
-- **Queue-based Processing**: Asynchronous episode processing with per-group_id sequential guarantees
-- **Configuration-driven**: YAML-based configuration with environment variable support and CLI overrides
+**Key Architectural Characteristics:**
+- **Layered Architecture**: API Layer (MCP Tools) -> Service Layer -> Integration Layer -> External Services
+- **Factory Pattern**: Configurable client creation for LLM, Embedder, and Database providers
+- **Queue-Based Processing**: Sequential episode processing per group_id to prevent race conditions
+- **Configuration-Driven**: YAML + Environment Variables with hierarchical overrides
+- **Dual Entry Points**: Factory-based (cloud) and legacy (local development)
 
-### Layered Architecture Diagram
+---
+
+## System Architecture (Layered View)
+
+### Diagram
+
 ```mermaid
-flowchart TB
-    subgraph "Presentation Layer"
-        MCP[FastMCP Server]
-        TOOLS[MCP Tools API]
-        HTTP[HTTP/SSE/STDIO Transports]
+graph TB
+    subgraph "API Layer"
+        A1[FastMCP Server]
+        A2[MCP Tools]
+        A3[Custom Routes]
+        A1 --> A2
+        A1 --> A3
     end
 
     subgraph "Service Layer"
-        GS[GraphitiService]
-        QS[QueueService]
-        FACT[LLMClientFactory]
-        FEMBEDDER[EmbedderFactory]
-        FDB[DatabaseDriverFactory]
+        S1[GraphitiService]
+        S2[QueueService]
+        S1 -.manages.-> S2
     end
 
-    subgraph "Core Integration Layer"
-        GRAPHITI[Graphiti Core Client]
-        DRIVER[Database Driver<br/>Neo4j/FalkorDB]
-        LLM[LLM Client<br/>OpenAI/Anthropic/etc]
-        EMBEDDER[Embedder Client<br/>OpenAI/Gemini/etc]
+    subgraph "Factory Layer"
+        F1[LLMClientFactory]
+        F2[EmbedderFactory]
+        F3[DatabaseDriverFactory]
     end
 
     subgraph "Configuration Layer"
-        CONFIG[GraphitiConfig]
-        YAML[YAML Settings Source]
-        ENV[Environment Variables]
-        CLI[CLI Arguments]
+        C1[GraphitiConfig]
+        C2[YamlSettingsSource]
+        C3[Environment Variables]
+        C4[YAML Config Files]
+        C1 --> C2
+        C2 --> C3
+        C2 --> C4
     end
 
-    subgraph "Model Layer"
-        ENTITY[Entity Types]
-        RESPONSE[Response Types]
+    subgraph "Data Models Layer"
+        M1[Response Types]
+        M2[Entity Types]
+        M3[Config Schemas]
     end
 
-    subgraph "Data Layer"
-        NEO4J[(Neo4j Database)]
-        FALKOR[(FalkorDB Database)]
+    subgraph "Utilities Layer"
+        U1[Formatting Utils]
+        U2[Azure Utils]
     end
 
-    HTTP --> MCP
-    MCP --> TOOLS
-    TOOLS --> GS
-    TOOLS --> QS
+    subgraph "External Services"
+        E1[Graphiti Core Client]
+        E2[LLM Providers]
+        E3[Embedder Providers]
+        E4[Graph Database]
+        E1 --> E2
+        E1 --> E3
+        E1 --> E4
+    end
 
-    GS --> FACT
-    GS --> FEMBEDDER
-    GS --> FDB
+    A2 --> S1
+    A2 --> S2
+    S1 --> F1
+    S1 --> F2
+    S1 --> F3
+    F1 --> C1
+    F2 --> C1
+    F3 --> C1
+    S1 --> E1
+    A2 --> M1
+    S1 --> M2
+    F1 --> U2
+    A2 --> U1
 
-    FACT --> LLM
-    FEMBEDDER --> EMBEDDER
-    FDB --> DRIVER
-
-    GS --> GRAPHITI
-    GRAPHITI --> DRIVER
-    GRAPHITI --> LLM
-    GRAPHITI --> EMBEDDER
-
-    DRIVER --> NEO4J
-    DRIVER --> FALKOR
-
-    CONFIG --> GS
-    YAML --> CONFIG
-    ENV --> CONFIG
-    CLI --> CONFIG
-
-    ENTITY --> GS
-    RESPONSE --> TOOLS
-
-    QS --> GRAPHITI
-
-    style MCP fill:#e1f5ff
-    style GS fill:#fff4e1
-    style GRAPHITI fill:#e8f5e9
-    style CONFIG fill:#fce4ec
+    style A1 fill:#e1f5ff
+    style S1 fill:#fff4e6
+    style F1 fill:#f3e5f5
+    style F2 fill:#f3e5f5
+    style F3 fill:#f3e5f5
+    style C1 fill:#e8f5e9
+    style E1 fill:#fce4ec
 ```
 
-**Layer Responsibilities:**
+### Explanation
 
-1. **Presentation Layer**: Handles all MCP protocol communication and exposes tools as API endpoints
-   - FastMCP Server: Main entry point for MCP communication
-   - MCP Tools API: Tool definitions (add_memory, search_nodes, search_memory_facts, etc.)
-   - Transport Handlers: HTTP, SSE (deprecated), and STDIO transport implementations
+**API Layer** (`src/server.py`, `src/graphiti_mcp_server.py`)
+- Exposes MCP tools for knowledge graph operations
+- Handles HTTP/stdio transport and custom routes
+- Implements tool registration via closure pattern
+- File: `src/server.py` (Lines 230-455)
 
-2. **Service Layer**: Business logic and orchestration
-   - GraphitiService: Main service coordinating Graphiti Core operations
-   - QueueService: Manages sequential episode processing per group_id
-   - Factories: Create and configure LLM, Embedder, and Database clients
+**Service Layer** (`src/server.py:88-168`, `src/services/queue_service.py`)
+- **GraphitiService**: Manages Graphiti client lifecycle, initialization, and provider setup
+- **QueueService**: Handles sequential episode processing with per-group_id queues
+- Provides business logic abstraction from API layer
+- Files:
+  - `src/server.py` (Lines 88-168)
+  - `src/services/queue_service.py`
 
-3. **Core Integration Layer**: Integration with Graphiti Core library
-   - Graphiti Core Client: Primary interface to the Graphiti knowledge graph library
-   - Database Drivers: Neo4j or FalkorDB graph database drivers
-   - AI Clients: LLM and Embedder clients for entity extraction and search
+**Factory Layer** (`src/services/factories.py`)
+- **LLMClientFactory**: Creates LLM clients (OpenAI, Azure, Anthropic, Gemini, Groq)
+- **EmbedderFactory**: Creates embedder clients (OpenAI, Azure, Gemini, Voyage)
+- **DatabaseDriverFactory**: Creates database configs (Neo4j, FalkorDB)
+- Enables provider abstraction and dependency injection
+- File: `src/services/factories.py` (Lines 100-440)
 
-4. **Configuration Layer**: Centralized configuration management
-   - Multi-source configuration: YAML files, environment variables, CLI arguments
-   - Validation and type safety via Pydantic
-   - Provider-specific configurations
+**Configuration Layer** (`src/config/schema.py`)
+- Hierarchical configuration: CLI > ENV > YAML > Defaults
+- Environment variable expansion in YAML files
+- Provider-specific configuration classes
+- File: `src/config/schema.py` (Lines 1-293)
 
-5. **Model Layer**: Data models and type definitions
-   - Entity Types: Custom entity type definitions (Requirement, Preference, Procedure, etc.)
-   - Response Types: Structured response formats for MCP tools
+**Data Models Layer** (`src/models/`)
+- Response types for MCP tool outputs (TypedDict)
+- Entity types for knowledge extraction (Pydantic)
+- Configuration schemas (Pydantic BaseSettings)
+- Files:
+  - `src/models/response_types.py`
+  - `src/models/entity_types.py`
 
-6. **Data Layer**: Persistent storage
-   - Graph databases for knowledge graph storage (Neo4j or FalkorDB)
+**Utilities Layer** (`src/utils/`)
+- Formatting utilities for nodes and edges
+- Azure AD credential providers
+- Files:
+  - `src/utils/formatting.py`
+  - `src/utils/utils.py`
+
+**External Services**
+- **Graphiti Core**: Knowledge graph library
+- **LLM Providers**: OpenAI, Azure OpenAI, Anthropic, Gemini, Groq
+- **Embedder Providers**: OpenAI, Azure OpenAI, Gemini, Voyage
+- **Graph Databases**: FalkorDB (Redis-based), Neo4j
+
+---
 
 ## Component Relationships
 
-### Overview
-The system uses a service-oriented architecture where the GraphitiService acts as the central coordinator. It uses factory classes to create provider-specific clients (LLM, Embedder, Database), and delegates episode processing to the QueueService for concurrent handling with sequential guarantees per group_id.
+### Diagram
 
-### Component Diagram
 ```mermaid
-flowchart LR
-    subgraph "Entry Point"
-        MAIN[main.py]
-        SERVER[graphiti_mcp_server.py]
+graph LR
+    subgraph "Entry Points"
+        E1[main.py]
+        E2[server.py::create_server]
+        E3[graphiti_mcp_server.py::main]
     end
 
-    subgraph "Configuration System"
-        CONFIG[GraphitiConfig]
-        SCONFIG[ServerConfig]
-        LCONFIG[LLMConfig]
-        ECONFIG[EmbedderConfig]
-        DBCONFIG[DatabaseConfig]
-    end
-
-    subgraph "Service Components"
-        GRAPHITI_SVC[GraphitiService]
-        QUEUE_SVC[QueueService]
+    subgraph "Core Components"
+        C1[GraphitiConfig]
+        C2[GraphitiService]
+        C3[QueueService]
+        C4[FastMCP Server]
     end
 
     subgraph "Factory Components"
-        LLM_FACTORY[LLMClientFactory]
-        EMB_FACTORY[EmbedderFactory]
-        DB_FACTORY[DatabaseDriverFactory]
+        F1[LLMClientFactory]
+        F2[EmbedderFactory]
+        F3[DatabaseDriverFactory]
     end
 
-    subgraph "MCP Tools"
-        ADD_MEM[add_memory]
-        SEARCH_NODES[search_nodes]
-        SEARCH_FACTS[search_memory_facts]
-        GET_EPISODES[get_episodes]
-        DELETE[delete_episode/edge]
-        CLEAR[clear_graph]
-        STATUS[get_status]
+    subgraph "External Integration"
+        I1[Graphiti Client]
+        I2[LLM Client]
+        I3[Embedder Client]
+        I4[Database Driver]
     end
 
-    subgraph "Utilities"
-        FORMAT[formatting.py]
-        UTILS[utils.py]
-    end
+    E1 -.legacy wrapper.-> E3
+    E2 -.factory pattern.-> C1
+    E3 -.legacy pattern.-> C1
 
-    MAIN --> SERVER
-    SERVER --> CONFIG
-    CONFIG --> SCONFIG
-    CONFIG --> LCONFIG
-    CONFIG --> ECONFIG
-    CONFIG --> DBCONFIG
+    E2 --> C2
+    E2 --> C3
+    E2 --> C4
 
-    SERVER --> GRAPHITI_SVC
-    SERVER --> QUEUE_SVC
+    C1 --> F1
+    C1 --> F2
+    C1 --> F3
 
-    GRAPHITI_SVC --> LLM_FACTORY
-    GRAPHITI_SVC --> EMB_FACTORY
-    GRAPHITI_SVC --> DB_FACTORY
+    C2 --> F1
+    C2 --> F2
+    C2 --> F3
 
-    ADD_MEM --> QUEUE_SVC
-    SEARCH_NODES --> GRAPHITI_SVC
-    SEARCH_FACTS --> GRAPHITI_SVC
-    GET_EPISODES --> GRAPHITI_SVC
-    DELETE --> GRAPHITI_SVC
-    CLEAR --> GRAPHITI_SVC
-    STATUS --> GRAPHITI_SVC
+    F1 --> I2
+    F2 --> I3
+    F3 --> I4
 
-    SEARCH_FACTS --> FORMAT
-    GRAPHITI_SVC --> UTILS
+    C2 --> I1
+    I1 --> I2
+    I1 --> I3
+    I1 --> I4
 
-    style MAIN fill:#e1f5ff
-    style CONFIG fill:#fce4ec
-    style GRAPHITI_SVC fill:#fff4e1
-    style QUEUE_SVC fill:#fff4e1
+    C3 --> I1
+    C4 --> C2
+    C4 --> C3
+
+    style E2 fill:#e1f5ff
+    style C2 fill:#fff4e6
+    style F1 fill:#f3e5f5
+    style F2 fill:#f3e5f5
+    style F3 fill:#f3e5f5
+    style I1 fill:#fce4ec
 ```
 
-**Key Relationships:**
+### Explanation
 
-1. **Initialization Flow**: main.py → graphiti_mcp_server.py → initialize_server() → GraphitiService + QueueService
-2. **Configuration Cascade**: GraphitiConfig contains nested configs (ServerConfig, LLMConfig, EmbedderConfig, DatabaseConfig)
-3. **Factory Pattern**: GraphitiService uses factories to create provider-specific clients
-4. **Tool Routing**: MCP tools route to either GraphitiService (for queries) or QueueService (for writes)
-5. **Utility Support**: Formatting utilities for response serialization, utils for Azure AD authentication
+**Entry Point Relationships:**
+- `main.py` is a backward-compatible wrapper delegating to `graphiti_mcp_server.py`
+- `server.py::create_server()` is the modern factory-based entry point for FastMCP Cloud
+- `graphiti_mcp_server.py::main()` is the legacy entry point with global state
+
+**Configuration Flow:**
+- GraphitiConfig loads from YAML files and environment variables
+- Configuration is passed to factory classes for client creation
+- Factory classes create concrete provider implementations
+
+**Service Dependencies:**
+- GraphitiService uses factories to create LLM, embedder, and database clients
+- GraphitiService initializes the Graphiti Core client
+- QueueService depends on initialized Graphiti client for episode processing
+- FastMCP Server uses closures to capture service instances in tool functions
+
+**Client Creation Flow:**
+```
+GraphitiConfig -> Factory Classes -> Provider Clients -> Graphiti Client
+```
+
+**Request Processing Flow:**
+```
+MCP Client -> FastMCP Server -> MCP Tool -> GraphitiService/QueueService -> Graphiti Client -> Database
+```
+
+---
 
 ## Class Hierarchies
 
-### Overview
-The codebase uses Pydantic models extensively for configuration and data validation. Entity types are dynamically created Pydantic models, while response types use TypedDict for MCP tool returns. The service classes follow a simple initialization pattern without deep inheritance.
+### Diagram
 
-### Class Diagram
 ```mermaid
 classDiagram
     class BaseSettings {
-        +model_config: SettingsConfigDict
+        <<Pydantic>>
+        +model_config
         +settings_customise_sources()
     }
 
     class GraphitiConfig {
-        +server: ServerConfig
-        +llm: LLMConfig
-        +embedder: EmbedderConfig
-        +database: DatabaseConfig
-        +graphiti: GraphitiAppConfig
-        +destroy_graph: bool
+        +ServerConfig server
+        +LLMConfig llm
+        +EmbedderConfig embedder
+        +DatabaseConfig database
+        +GraphitiAppConfig graphiti
+        +bool destroy_graph
         +apply_cli_overrides(args)
     }
 
+    class BaseModel {
+        <<Pydantic>>
+        +model_dump()
+        +model_validate()
+    }
+
     class ServerConfig {
-        +transport: str
-        +host: str
-        +port: int
+        +str transport
+        +str host
+        +int port
     }
 
     class LLMConfig {
-        +provider: str
-        +model: str
-        +temperature: float
-        +max_tokens: int
-        +providers: LLMProvidersConfig
+        +str provider
+        +str model
+        +float temperature
+        +int max_tokens
+        +LLMProvidersConfig providers
     }
 
     class EmbedderConfig {
-        +provider: str
-        +model: str
-        +dimensions: int
-        +providers: EmbedderProvidersConfig
+        +str provider
+        +str model
+        +int dimensions
+        +EmbedderProvidersConfig providers
     }
 
     class DatabaseConfig {
-        +provider: str
-        +providers: DatabaseProvidersConfig
+        +str provider
+        +DatabaseProvidersConfig providers
     }
 
     class GraphitiAppConfig {
-        +group_id: str
-        +episode_id_prefix: str
-        +user_id: str
-        +entity_types: list[EntityTypeConfig]
+        +str group_id
+        +str episode_id_prefix
+        +str user_id
+        +list~EntityTypeConfig~ entity_types
     }
 
     class GraphitiService {
-        -config: GraphitiConfig
-        -semaphore_limit: int
-        -semaphore: asyncio.Semaphore
-        -client: Graphiti
-        -entity_types: dict
+        -GraphitiConfig config
+        -int semaphore_limit
+        -Semaphore semaphore
+        -Graphiti client
+        -dict entity_types
         +initialize()
         +get_client()
     }
 
     class QueueService {
-        -_episode_queues: dict[str, asyncio.Queue]
-        -_queue_workers: dict[str, bool]
-        -_graphiti_client: Graphiti
-        +initialize(graphiti_client)
-        +add_episode_task(group_id, process_func)
+        -dict~str,Queue~ _episode_queues
+        -dict~str,bool~ _queue_workers
+        -Any _graphiti_client
+        +initialize(client)
         +add_episode(...)
+        +add_episode_task(group_id, func)
+        +get_queue_size(group_id)
+        +is_worker_running(group_id)
         -_process_episode_queue(group_id)
     }
 
     class LLMClientFactory {
-        +create(config: LLMConfig)$ LLMClient
+        <<Factory>>
+        +create(config)$ LLMClient
     }
 
     class EmbedderFactory {
-        +create(config: EmbedderConfig)$ EmbedderClient
+        <<Factory>>
+        +create(config)$ EmbedderClient
     }
 
     class DatabaseDriverFactory {
-        +create_config(config: DatabaseConfig)$ dict
+        <<Factory>>
+        +create_config(config)$ dict
     }
 
-    class BaseModel {
-        +model_dump()
+    class EntityTypeConfig {
+        +str name
+        +str description
     }
 
     class Requirement {
-        +project_name: str
-        +description: str
+        +str project_name
+        +str description
     }
 
     class Preference {
@@ -306,36 +357,36 @@ classDiagram
     }
 
     class Procedure {
-        +description: str
+        +str description
     }
 
     class Location {
-        +name: str
-        +description: str
+        +str name
+        +str description
     }
 
     class Event {
-        +name: str
-        +description: str
+        +str name
+        +str description
     }
 
     class Organization {
-        +name: str
-        +description: str
+        +str name
+        +str description
     }
 
     class Document {
-        +title: str
-        +description: str
+        +str title
+        +str description
     }
 
     BaseSettings <|-- GraphitiConfig
-    GraphitiConfig *-- ServerConfig
-    GraphitiConfig *-- LLMConfig
-    GraphitiConfig *-- EmbedderConfig
-    GraphitiConfig *-- DatabaseConfig
-    GraphitiConfig *-- GraphitiAppConfig
-
+    BaseModel <|-- ServerConfig
+    BaseModel <|-- LLMConfig
+    BaseModel <|-- EmbedderConfig
+    BaseModel <|-- DatabaseConfig
+    BaseModel <|-- GraphitiAppConfig
+    BaseModel <|-- EntityTypeConfig
     BaseModel <|-- Requirement
     BaseModel <|-- Preference
     BaseModel <|-- Procedure
@@ -344,445 +395,410 @@ classDiagram
     BaseModel <|-- Organization
     BaseModel <|-- Document
 
-    GraphitiService ..> GraphitiConfig : uses
-    GraphitiService ..> LLMClientFactory : uses
-    GraphitiService ..> EmbedderFactory : uses
-    GraphitiService ..> DatabaseDriverFactory : uses
+    GraphitiConfig *-- ServerConfig
+    GraphitiConfig *-- LLMConfig
+    GraphitiConfig *-- EmbedderConfig
+    GraphitiConfig *-- DatabaseConfig
+    GraphitiConfig *-- GraphitiAppConfig
+    GraphitiAppConfig *-- EntityTypeConfig
 
-    QueueService ..> GraphitiService : uses client from
+    GraphitiService --> GraphitiConfig
+    GraphitiService --> LLMClientFactory
+    GraphitiService --> EmbedderFactory
+    GraphitiService --> DatabaseDriverFactory
+
+    QueueService --> GraphitiService
 ```
 
-**Class Design Patterns:**
+### Explanation
 
-1. **Configuration Composition**: GraphitiConfig aggregates multiple configuration classes
-2. **Static Factories**: Factory classes use static methods to create instances
-3. **Service Pattern**: GraphitiService and QueueService are stateful services initialized at startup
-4. **Pydantic Models**: Entity types and configurations use Pydantic for validation
-5. **TypedDict Responses**: Response types use TypedDict for lightweight structured returns
+**Configuration Hierarchy:**
+- `GraphitiConfig` extends Pydantic `BaseSettings` for environment variable support
+- Nested configuration classes extend `BaseModel` for validation
+- Composition pattern: GraphitiConfig contains ServerConfig, LLMConfig, EmbedderConfig, etc.
+- File: `src/config/schema.py` (Lines 230-293)
+
+**Service Classes:**
+- `GraphitiService`: Manages Graphiti client lifecycle, uses factories for initialization
+- `QueueService`: Independent service for queue management, depends on Graphiti client
+- Both services use dependency injection pattern
+- Files:
+  - `src/server.py` (Lines 88-168)
+  - `src/services/queue_service.py` (Lines 12-153)
+
+**Factory Pattern:**
+- Static factory methods for creating provider-specific clients
+- Each factory handles multiple provider types via match/case
+- File: `src/services/factories.py` (Lines 100-440)
+
+**Entity Type Models:**
+- All entity types inherit from Pydantic `BaseModel`
+- Used for custom knowledge extraction in Graphiti
+- Defines schema for structured entity extraction
+- File: `src/models/entity_types.py` (Lines 6-225)
+
+**Inheritance Patterns:**
+- Configuration classes use composition over inheritance
+- Entity types use inheritance for base Pydantic functionality
+- Factory classes use static methods (no inheritance)
+
+---
 
 ## Module Dependencies
 
-### Overview
-The module structure is organized into clear packages: config (configuration management), services (business logic), models (data definitions), and utils (helper functions). The main server module orchestrates all components and exposes MCP tools.
+### Diagram
 
-### Dependency Diagram
 ```mermaid
-flowchart TD
-    subgraph "Root Modules"
-        MAIN[main.py]
-        SERVER[src/graphiti_mcp_server.py]
+graph TD
+    subgraph "Entry Points"
+        M1[main.py]
+        M2[src/server.py]
+        M3[src/graphiti_mcp_server.py]
     end
 
-    subgraph "Config Package"
-        CFG_INIT[src/config/__init__.py]
-        CFG_SCHEMA[src/config/schema.py]
+    subgraph "Configuration"
+        C1[src/config/schema.py]
     end
 
-    subgraph "Models Package"
-        MOD_INIT[src/models/__init__.py]
-        MOD_ENTITY[src/models/entity_types.py]
-        MOD_RESPONSE[src/models/response_types.py]
+    subgraph "Services"
+        S1[src/services/factories.py]
+        S2[src/services/queue_service.py]
     end
 
-    subgraph "Services Package"
-        SVC_INIT[src/services/__init__.py]
-        SVC_FACTORY[src/services/factories.py]
-        SVC_QUEUE[src/services/queue_service.py]
+    subgraph "Models"
+        D1[src/models/response_types.py]
+        D2[src/models/entity_types.py]
     end
 
-    subgraph "Utils Package"
-        UTL_INIT[src/utils/__init__.py]
-        UTL_FORMAT[src/utils/formatting.py]
-        UTL_UTILS[src/utils/utils.py]
+    subgraph "Utilities"
+        U1[src/utils/formatting.py]
+        U2[src/utils/utils.py]
     end
 
-    subgraph "External Dependencies"
-        GRAPHITI[graphiti_core]
-        FASTMCP[fastmcp]
-        PYDANTIC[pydantic]
-        DOTENV[python-dotenv]
-        OPENAI[openai]
-        YAML[pyyaml]
+    subgraph "External Libraries"
+        E1[fastmcp]
+        E2[graphiti_core]
+        E3[pydantic]
+        E4[dotenv]
+        E5[asyncio]
     end
 
-    MAIN --> SERVER
+    M1 --> M3
+    M2 --> C1
+    M2 --> D1
+    M2 --> S1
+    M2 --> S2
+    M2 --> U1
+    M2 --> E1
+    M2 --> E2
 
-    SERVER --> CFG_SCHEMA
-    SERVER --> MOD_RESPONSE
-    SERVER --> SVC_FACTORY
-    SERVER --> SVC_QUEUE
-    SERVER --> UTL_FORMAT
-    SERVER --> FASTMCP
-    SERVER --> GRAPHITI
-    SERVER --> DOTENV
+    M3 --> C1
+    M3 --> D1
+    M3 --> S1
+    M3 --> S2
+    M3 --> U1
+    M3 --> E1
+    M3 --> E2
 
-    CFG_SCHEMA --> PYDANTIC
-    CFG_SCHEMA --> YAML
+    S1 --> C1
+    S1 --> U2
 
-    MOD_ENTITY --> PYDANTIC
-    MOD_RESPONSE --> PYDANTIC
+    S2 --> E5
 
-    SVC_FACTORY --> CFG_SCHEMA
-    SVC_FACTORY --> UTL_UTILS
-    SVC_FACTORY --> GRAPHITI
-    SVC_FACTORY --> OPENAI
+    C1 --> E3
+    C1 --> E4
 
-    UTL_FORMAT --> GRAPHITI
+    D1 --> E3
+    D2 --> E3
 
-    style MAIN fill:#e1f5ff
-    style SERVER fill:#e1f5ff
-    style CFG_SCHEMA fill:#fce4ec
-    style SVC_FACTORY fill:#fff4e1
-    style SVC_QUEUE fill:#fff4e1
-    style GRAPHITI fill:#e8f5e9
-    style FASTMCP fill:#e8f5e9
+    U1 --> E2
+
+    style M2 fill:#e1f5ff
+    style C1 fill:#e8f5e9
+    style S1 fill:#f3e5f5
+    style S2 fill:#f3e5f5
+    style E1 fill:#ffebee
+    style E2 fill:#ffebee
 ```
 
-**Dependency Layers:**
+### Explanation
 
-1. **Entry Layer** (main.py, graphiti_mcp_server.py)
-   - Imports from all internal packages
-   - Directly depends on external frameworks (fastmcp, graphiti_core)
+**Entry Point Dependencies:**
+- `main.py` only imports `graphiti_mcp_server` for backward compatibility
+- `src/server.py` imports config, models, services, and utilities (modern approach)
+- `src/graphiti_mcp_server.py` has similar imports (legacy approach)
 
-2. **Configuration Layer** (config/)
-   - schema.py: Depends on pydantic, pyyaml
-   - No dependencies on other internal packages
+**Core Module Import Structure:**
 
-3. **Models Layer** (models/)
-   - entity_types.py: Depends only on pydantic
-   - response_types.py: Depends only on typing_extensions
-   - No dependencies on other internal packages
+**Configuration Module** (`src/config/schema.py`):
+- Depends on: `pydantic`, `pydantic_settings`, `yaml`, `pathlib`, `os`
+- Provides: Configuration schemas used throughout the application
+- No internal dependencies (leaf module in dependency tree)
 
-4. **Services Layer** (services/)
-   - factories.py: Depends on config, utils, graphiti_core, openai
-   - queue_service.py: Minimal dependencies (asyncio, logging)
+**Factory Module** (`src/services/factories.py`):
+- Imports: `config.schema` (GraphitiConfig and provider configs)
+- Imports: `utils.utils` (Azure credential helpers)
+- Conditional imports: Graphiti Core provider clients
+- Provides: Factory classes for LLM, Embedder, Database client creation
 
-5. **Utils Layer** (utils/)
-   - formatting.py: Depends on graphiti_core
-   - utils.py: Depends on azure.identity (optional)
+**Queue Service Module** (`src/services/queue_service.py`):
+- Imports: `asyncio`, `logging`, `datetime`
+- No internal module dependencies
+- Provides: Queue management for episode processing
 
-**Import Guidelines:**
+**Models Modules** (`src/models/`):
+- `response_types.py`: Depends on `typing_extensions` for TypedDict
+- `entity_types.py`: Depends on `pydantic` for BaseModel
+- Both are leaf modules with no internal dependencies
 
-- **Top-down dependencies**: Server → Services → Config/Models/Utils
-- **No circular dependencies**: Clean separation between layers
-- **Optional imports**: Provider-specific clients are imported conditionally
-- **External isolation**: External dependencies concentrated in factories and server
+**Utilities Modules** (`src/utils/`):
+- `formatting.py`: Imports `graphiti_core.edges`, `graphiti_core.nodes`
+- `utils.py`: Imports `azure.identity` conditionally
+- Minimal internal dependencies
+
+**External Library Dependencies:**
+- **FastMCP**: Server framework for MCP protocol
+- **Graphiti Core**: Knowledge graph library (main integration)
+- **Pydantic**: Data validation and settings management
+- **AsyncIO**: Asynchronous operation support
+- **dotenv**: Environment variable loading
+
+**Dependency Injection Pattern:**
+```
+server.py → services (factories, queue) → config → external providers
+```
+
+**Import Hierarchy (least to most dependent):**
+1. Models (no internal imports)
+2. Config (imports only external libraries)
+3. Utilities (minimal imports)
+4. Services (import config, utils)
+5. Server modules (import everything)
+
+---
 
 ## Data Flow
 
-### Overview
-The system processes data through several key flows: episode addition (async write path), search operations (sync read path), and initialization (setup). The episode addition flow uses a queue-based system to ensure sequential processing per group_id while allowing concurrent processing across different groups.
+### Diagram
 
-### Episode Addition Flow
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant MCP as FastMCP Server
-    participant Tool as add_memory Tool
-    participant QS as QueueService
-    participant Worker as Queue Worker
-    participant GC as Graphiti Client
-    participant DB as Database
-    participant LLM as LLM Client
-    participant EMB as Embedder Client
+    participant Client as MCP Client
+    participant Server as FastMCP Server
+    participant Tool as MCP Tool (add_memory)
+    participant Queue as QueueService
+    participant Graphiti as GraphitiService
+    participant Factory as ClientFactory
+    participant Core as Graphiti Core
+    participant DB as Graph Database
 
-    Client->>MCP: Add episode request
-    MCP->>Tool: add_memory(name, content, group_id, ...)
+    Note over Client,DB: Initialization Flow
+    Server->>Graphiti: initialize()
+    Graphiti->>Factory: create LLM client
+    Factory-->>Graphiti: LLM client
+    Graphiti->>Factory: create Embedder client
+    Factory-->>Graphiti: Embedder client
+    Graphiti->>Factory: create DB config
+    Factory-->>Graphiti: DB config
+    Graphiti->>Core: Graphiti(llm, embedder, db)
+    Core-->>Graphiti: client instance
+    Graphiti->>Queue: initialize(client)
 
-    Note over Tool: Validate parameters
-    Tool->>Tool: Parse episode_type enum
-    Tool->>Tool: Determine effective_group_id
+    Note over Client,DB: Episode Addition Flow
+    Client->>Server: add_memory(name, content, group_id)
+    Server->>Tool: route request
+    Tool->>Queue: add_episode(params)
+    Queue->>Queue: queue episode task
+    Queue-->>Tool: queue position
+    Tool-->>Server: SuccessResponse
+    Server-->>Client: response
 
-    Tool->>QS: add_episode(group_id, name, content, ...)
+    Note over Queue,DB: Background Processing
+    Queue->>Queue: _process_episode_queue()
+    Queue->>Core: add_episode(content)
+    Core->>Core: extract entities
+    Core->>Core: create embeddings
+    Core->>Core: deduplicate entities
+    Core->>Core: extract relationships
+    Core->>DB: write nodes & edges
+    DB-->>Core: success
+    Core-->>Queue: episode processed
 
-    Note over QS: Create async task
-    QS->>QS: Create queue for group_id (if new)
-    QS->>QS: Add process_func to queue
-    QS->>Worker: Start worker (if not running)
-    QS-->>Tool: Return queue position
-
-    Tool-->>MCP: SuccessResponse(queued)
-    MCP-->>Client: Episode queued message
-
-    Note over Worker,GC: Async processing
-    Worker->>Worker: Dequeue process_func
-    Worker->>GC: add_episode(name, content, ...)
-
-    activate GC
-    GC->>LLM: Extract entities from content
-    LLM-->>GC: Entity list
-
-    GC->>LLM: Deduplicate entities
-    LLM-->>GC: Deduplicated entities
-
-    GC->>EMB: Generate embeddings
-    EMB-->>GC: Embeddings
-
-    GC->>DB: Create nodes and edges
-    DB-->>GC: Confirmation
-    deactivate GC
-
-    Worker->>QS: Mark task_done()
-
-    Note over Worker: Process next episode in queue
+    Note over Client,DB: Search Flow
+    Client->>Server: search_nodes(query)
+    Server->>Tool: route request
+    Tool->>Graphiti: get_client()
+    Graphiti-->>Tool: client
+    Tool->>Core: search_(query, config)
+    Core->>DB: hybrid search query
+    DB-->>Core: matching nodes
+    Core-->>Tool: search results
+    Tool->>Tool: format results
+    Tool-->>Server: NodeSearchResponse
+    Server-->>Client: response
 ```
 
-### Search Flow
+### Explanation
+
+**Initialization Flow** (`src/server.py:173-219`):
+1. `create_server()` factory loads GraphitiConfig from environment/YAML
+2. GraphitiService uses factories to create LLM, Embedder, and Database clients
+3. Factories handle provider-specific initialization (OpenAI, Azure, Anthropic, etc.)
+4. GraphitiService creates Graphiti Core client with all providers
+5. QueueService is initialized with Graphiti client
+6. FastMCP server is created and tools are registered
+7. File: `src/server.py` (Lines 173-219)
+
+**Episode Addition Flow** (`src/server.py:231-266`):
+1. MCP client calls `add_memory` tool with episode data
+2. Tool validates source type and sets effective group_id
+3. Episode is queued via QueueService.add_episode()
+4. QueueService creates background task if needed
+5. Immediate response returned to client (async processing)
+6. Background worker processes episode sequentially per group_id
+7. File: `src/server.py` (Lines 231-266)
+
+**Background Episode Processing** (`src/services/queue_service.py:128-152`):
+1. Background worker retrieves queued task
+2. Calls Graphiti Core add_episode() method
+3. Graphiti extracts entities using LLM
+4. Entities are embedded using embedder client
+5. Deduplication and relationship extraction occur
+6. Nodes and edges written to graph database
+7. Worker marks task complete and processes next
+8. File: `src/services/queue_service.py` (Lines 128-152)
+
+**Search Flow** (`src/server.py:268-312`):
+1. MCP client calls `search_nodes` with natural language query
+2. Tool retrieves initialized Graphiti client
+3. Search filters created for entity types
+4. Hybrid search (vector + keyword) executed
+5. Database returns matching nodes with relevance scores
+6. Results formatted and returned to client
+7. File: `src/server.py` (Lines 268-312)
+
+**Configuration Flow** (`src/config/schema.py:249-262`):
+```
+YAML File -> YamlSettingsSource -> Environment Variable Expansion
+    -> Pydantic Validation -> GraphitiConfig Instance
+    -> Provider-Specific Configs -> Factory Classes
+```
+
+**Error Handling:**
+- Factory methods validate API keys and provider availability
+- Service methods catch exceptions and return ErrorResponse
+- Queue processing logs errors but continues with next task
+- Background workers have CancelledError handling
+
+**Data Transformation:**
+- Input: Raw text/JSON/messages from MCP client
+- Processing: Entity extraction, embedding generation
+- Storage: Graph nodes (entities) and edges (relationships)
+- Output: Formatted search results with metadata
+
+---
+
+## Deployment Patterns
+
+### Diagram
+
 ```mermaid
-sequenceDiagram
-    participant Client
-    participant MCP as FastMCP Server
-    participant Tool as search_nodes Tool
-    participant GS as GraphitiService
-    participant GC as Graphiti Client
-    participant EMB as Embedder Client
-    participant DB as Database
-    participant FMT as Formatting Utils
+graph TB
+    subgraph "FastMCP Cloud Deployment"
+        FC1[FastMCP Cloud Platform]
+        FC2[Environment Variables]
+        FC3[create_server Factory]
+        FC4[FastMCP Server Instance]
 
-    Client->>MCP: Search request
-    MCP->>Tool: search_nodes(query, group_ids, ...)
-
-    Tool->>Tool: Determine effective_group_ids
-    Tool->>Tool: Create SearchFilters
-
-    Tool->>GS: get_client()
-    GS-->>Tool: Graphiti Client
-
-    Tool->>GC: search_(query, config, group_ids, filters)
-
-    activate GC
-    GC->>EMB: Generate query embedding
-    EMB-->>GC: Query embedding
-
-    GC->>DB: Hybrid search (vector + text)
-    DB-->>GC: Matching nodes
-    deactivate GC
-
-    GC-->>Tool: Search results
-
-    loop For each node
-        Tool->>Tool: Remove embeddings from attributes
-        Tool->>Tool: Create NodeResult
+        FC1 --> FC2
+        FC2 --> FC3
+        FC3 --> FC4
     end
 
-    Tool-->>MCP: NodeSearchResponse
-    MCP-->>Client: Search results
-```
+    subgraph "Local Development"
+        LD1[main.py / server.py]
+        LD2[YAML Config + .env]
+        LD3[CLI Arguments]
+        LD4[Config Merger]
+        LD5[Server Instance]
 
-### Initialization Flow
-```mermaid
-sequenceDiagram
-    participant Main as main.py
-    participant Server as graphiti_mcp_server
-    participant Config as GraphitiConfig
-    participant YAML as YAML File
-    participant ENV as Environment
-    participant GS as GraphitiService
-    participant Factories as Factory Classes
-    participant QS as QueueService
-    participant GC as Graphiti Client
-    participant DB as Database Driver
-
-    Main->>Server: main()
-    Server->>Server: initialize_server()
-
-    Note over Server,ENV: Configuration Loading
-    Server->>Config: GraphitiConfig()
-    Config->>YAML: Load config.yaml
-    YAML-->>Config: YAML settings
-    Config->>ENV: Read environment variables
-    ENV-->>Config: Environment settings
-    Config->>Config: Merge with defaults
-    Config-->>Server: Unified configuration
-
-    Server->>Server: Apply CLI overrides
-
-    Note over Server,GS: Service Initialization
-    Server->>GS: GraphitiService(config)
-    Server->>GS: initialize()
-
-    activate GS
-    GS->>Factories: LLMClientFactory.create(config.llm)
-    Factories-->>GS: LLM Client
-
-    GS->>Factories: EmbedderFactory.create(config.embedder)
-    Factories-->>GS: Embedder Client
-
-    GS->>Factories: DatabaseDriverFactory.create_config(config.db)
-    Factories-->>GS: Database config
-
-    GS->>GC: Graphiti(driver, llm, embedder)
-    GC->>DB: Connect to database
-    DB-->>GC: Connection established
-    GC->>DB: build_indices_and_constraints()
-    DB-->>GC: Indices ready
-    GC-->>GS: Client ready
-    deactivate GS
-
-    Server->>QS: QueueService()
-    Server->>QS: initialize(graphiti_client)
-
-    Server->>Server: Set fastmcp settings (host, port)
-    Server-->>Main: ServerConfig
-
-    Main->>Server: run_mcp_server()
-    Server->>Server: Run with configured transport
-
-    Note over Server: Server running, ready for requests
-```
-
-### Configuration Resolution Flow
-```mermaid
-flowchart LR
-    subgraph "Priority Order (Highest to Lowest)"
-        CLI[1. CLI Arguments]
-        ENV[2. Environment Variables]
-        YAML[3. YAML Config File]
-        DEFAULT[4. Pydantic Defaults]
+        LD1 --> LD2
+        LD1 --> LD3
+        LD2 --> LD4
+        LD3 --> LD4
+        LD4 --> LD5
     end
 
-    subgraph "Configuration Sources"
-        CLI_ARGS[--llm-provider openai<br/>--model gpt-4<br/>--transport http]
-        ENV_VARS[OPENAI_API_KEY=xxx<br/>DATABASE__PROVIDER=falkordb]
-        YAML_FILE[llm:<br/>  provider: openai<br/>  model: gpt-4.1]
-        DEFAULTS[provider: 'openai'<br/>model: 'gpt-4.1'<br/>transport: 'http']
+    subgraph "Legacy Deployment"
+        LG1[graphiti_mcp_server.py]
+        LG2[Global State]
+        LG3[initialize_server]
+        LG4[Server Instance]
+
+        LG1 --> LG2
+        LG1 --> LG3
+        LG3 --> LG4
     end
 
-    CLI --> CLI_ARGS
-    ENV --> ENV_VARS
-    YAML --> YAML_FILE
-    DEFAULT --> DEFAULTS
+    subgraph "Shared Components"
+        SC1[GraphitiService]
+        SC2[QueueService]
+        SC3[Factory Classes]
+        SC4[Graphiti Core Client]
+    end
 
-    CLI_ARGS --> MERGE[Configuration Merger]
-    ENV_VARS --> MERGE
-    YAML_FILE --> MERGE
-    DEFAULTS --> MERGE
+    FC4 --> SC1
+    FC4 --> SC2
+    LD5 --> SC1
+    LD5 --> SC2
+    LG4 --> SC1
+    LG4 --> SC2
 
-    MERGE --> FINAL[Final GraphitiConfig]
+    SC1 --> SC3
+    SC1 --> SC4
+    SC2 --> SC4
 
-    style CLI fill:#ff9999
-    style ENV fill:#ffcc99
-    style YAML fill:#ffff99
-    style DEFAULT fill:#ccffcc
-    style FINAL fill:#99ccff
+    style FC3 fill:#e1f5ff
+    style LD4 fill:#fff4e6
+    style LG3 fill:#ffebee
+    style SC1 fill:#f3e5f5
 ```
 
-**Data Flow Characteristics:**
+### Explanation
 
-1. **Async Write Path**: Episode additions are queued and processed asynchronously, returning immediately to the client
-2. **Sequential Guarantees**: Episodes for the same group_id are processed sequentially to maintain consistency
-3. **Concurrent Processing**: Different group_ids can be processed in parallel (limited by semaphore)
-4. **Sync Read Path**: Search operations are synchronous and return results immediately
-5. **Configuration Cascade**: Configuration is resolved through multiple layers with clear priority order
-6. **Error Handling**: Each layer handles errors appropriately and returns structured error responses
+**FastMCP Cloud Deployment** (Recommended):
+- Entry: `src/server.py::create_server()` async factory function
+- Configuration: Environment variables only (no CLI args)
+- Pattern: Factory pattern with dependency injection
+- Initialization: All services initialized before server creation
+- File: `src/server.py` (Lines 173-219)
 
-## Key Architectural Patterns
+**Local Development Deployment**:
+- Entry: `main.py` or `python src/server.py`
+- Configuration: YAML files + .env + optional CLI overrides
+- Pattern: Same factory pattern as cloud
+- Flexibility: Supports transport selection (http/stdio)
+- File: `src/server.py` (Lines 461-495)
 
-### 1. Factory Pattern
-Used extensively for creating provider-specific clients (LLM, Embedder, Database) with configuration-driven selection.
+**Legacy Deployment** (Backward Compatibility):
+- Entry: `src/graphiti_mcp_server.py::main()`
+- Configuration: Full CLI argument parsing + YAML + .env
+- Pattern: Global state variables
+- Purpose: Maintains compatibility with existing scripts
+- File: `src/graphiti_mcp_server.py`
 
-**Location**: `src/services/factories.py`
+**Configuration Priority** (All Patterns):
+```
+CLI Arguments > Environment Variables > YAML Config > Defaults
+```
 
-**Benefits**:
-- Encapsulates complex client creation logic
-- Supports multiple providers without changing client code
-- Centralizes provider-specific configuration
+**Shared Service Layer**:
+- All deployment patterns use the same GraphitiService and QueueService
+- Factory classes ensure consistent client creation
+- Services are provider-agnostic
 
-### 2. Service Pattern
-GraphitiService and QueueService act as stateful facades to Graphiti Core functionality.
+**Key Differences**:
+- **Cloud**: No file system access, env vars only, factory pattern
+- **Local**: File access, multiple config sources, same factory pattern
+- **Legacy**: File access, global state, comprehensive CLI args
 
-**Locations**:
-- `src/graphiti_mcp_server.py` (lines 162-321)
-- `src/services/queue_service.py`
-
-**Benefits**:
-- Encapsulates initialization complexity
-- Manages lifecycle of Graphiti client
-- Provides clean interface for MCP tools
-
-### 3. Queue-based Async Processing
-Episodes are processed asynchronously through per-group queues to ensure sequential consistency while allowing concurrency.
-
-**Location**: `src/services/queue_service.py` (lines 49-80)
-
-**Benefits**:
-- Non-blocking API for episode addition
-- Sequential processing per group_id prevents race conditions
-- Concurrent processing across different groups
-
-### 4. Configuration Composition
-Multi-layered configuration system with YAML, environment variables, and CLI overrides.
-
-**Location**: `src/config/schema.py`
-
-**Benefits**:
-- Flexible deployment options (dev, staging, prod)
-- Type-safe configuration with Pydantic validation
-- Clear priority order for configuration sources
-
-### 5. Decorator-based Tool Registration
-MCP tools are registered using FastMCP decorators for clean, declarative API definition.
-
-**Location**: `src/graphiti_mcp_server.py` (lines 323-755)
-
-**Benefits**:
-- Clear tool definitions with type hints
-- Automatic request/response handling
-- Self-documenting API
-
-### 6. Response Type Standardization
-Consistent response types (SuccessResponse, ErrorResponse, etc.) across all tools.
-
-**Location**: `src/models/response_types.py`
-
-**Benefits**:
-- Predictable error handling
-- Consistent client experience
-- Easy to test and validate
-
-## Technology Stack
-
-### Core Technologies
-- **Python 3.10+**: Primary programming language
-- **FastMCP**: MCP protocol server implementation
-- **Graphiti Core**: Knowledge graph library
-- **Pydantic**: Data validation and configuration management
-- **asyncio**: Asynchronous programming support
-
-### AI/ML Integrations
-- **LLM Providers**: OpenAI, Azure OpenAI, Anthropic, Gemini, Groq
-- **Embedder Providers**: OpenAI, Azure OpenAI, Gemini, Voyage AI
-
-### Database Support
-- **Neo4j**: Graph database (bolt protocol)
-- **FalkorDB**: Redis-based graph database
-
-### Configuration & Deployment
-- **PyYAML**: Configuration file parsing
-- **python-dotenv**: Environment variable management
-- **Docker**: Containerization support
-- **uvicorn**: ASGI server for HTTP transport
-
-## File Reference
-
-### Main Server Files
-- `main.py` - Entry point wrapper
-- `src/graphiti_mcp_server.py` - Main server implementation with MCP tools
-
-### Configuration
-- `src/config/schema.py` - Pydantic configuration schemas
-
-### Services
-- `src/services/factories.py` - Client factories for LLM, Embedder, Database
-- `src/services/queue_service.py` - Queue-based episode processing
-
-### Models
-- `src/models/entity_types.py` - Custom entity type definitions
-- `src/models/response_types.py` - MCP tool response types
-
-### Utilities
-- `src/utils/formatting.py` - Response formatting utilities
-- `src/utils/utils.py` - Azure AD authentication utilities
-
-### Tests
-- `tests/` - Comprehensive test suite including integration, stress, and transport tests

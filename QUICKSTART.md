@@ -1,93 +1,52 @@
 # Graphiti MCP Quick Start
 
-A 5-minute guide to get a new Claude instance connected and productive with Graphiti knowledge graphs.
+**For New Claude Code Sessions**: The knowledge graph is self-documenting. Run this single query to get started:
 
-> **🔒 SECURITY WARNING**: Never commit sensitive information to version control or knowledge graphs:
-> - API keys, passwords, tokens, credentials
-> - Credit card numbers, financial data
-> - Personal Identifiable Information (PII): names, addresses, SSNs, emails
-> - Protected Health Information (PHI): medical records, diagnoses, prescriptions
-> - Proprietary business data
->
-> **All episodes added to knowledge graphs are stored in plaintext**. Use `.gitignore` for sensitive backups.
-> See [CLAUDE.md:194](CLAUDE.md#L194) for environment variable best practices.
+```python
+# Get the "Start Here" entry point that explains everything
+mcp__graphiti-fastmcp__get_episodes(
+    group_ids=["graphiti_meta_knowledge"],
+    max_episodes=1
+)
+# Look for: "Meta: Session Entry Point - Start Here for New Claude Instances"
+```
+
+This episode contains:
+- ✅ Graph structure overview (4 knowledge graphs available)
+- ✅ What each graph contains and how to query it
+- ✅ Known limitations and workarounds
+- ✅ What previous sessions accomplished
+- ✅ Recommended next exploration priorities
 
 ---
 
-## First 3 Commands
+> **🔒 SECURITY WARNING**: Never commit sensitive information to knowledge graphs:
+> - API keys, passwords, tokens, credentials, PII, PHI, proprietary business data
+>
+> **All episodes are stored in plaintext**. See [CLAUDE.md:194](CLAUDE.md#L194) for best practices.
 
-Run these immediately to verify connection and recover context:
+---
+
+## Alternative: Manual Quick Start
+
+If you prefer to explore directly:
 
 ```python
 # 1. Check connection
 mcp__graphiti-fastmcp__get_status()
-# Expected: {"status": "ok", "group_ids": [...]}
 
-# 2. Recover recent session context (if continuing after compression)
-mcp__graphiti-fastmcp__search_memory_facts(
-    query="session priorities pending tasks",
+# 2. Browse meta-knowledge (how to use Graphiti)
+mcp__graphiti-fastmcp__get_episodes(
     group_ids=["graphiti_meta_knowledge"],
-    max_facts=10
+    max_episodes=10
 )
-# Look for: "Next session priorities", "PRIORITY_INCLUDES" facts
 
-# 3. Query meta-knowledge about using Graphiti (if first time)
-mcp__graphiti-fastmcp__search_memory_facts(
-    query="best practices episode design",
-    group_ids=["graphiti_meta_knowledge"],
-    max_facts=5
+# 3. Browse decision tree (architecture selection guide)
+mcp__graphiti-fastmcp__get_episodes(
+    group_ids=["agent_memory_decision_tree_2025"],
+    max_episodes=10
 )
 ```
-
-**Note**: Command #2 recovers context from previous sessions. Command #3 teaches Graphiti basics.
-
----
-
-## Validating Your Local Server
-
-Before deploying to FastMCP Cloud, validate your server with TWO commands:
-
-### 1. Static Validation (Quick Check)
-
-```bash
-# Verify server structure and tool registration
-uv run fastmcp inspect src/server.py:create_server
-```
-
-**Expected output:**
-```
-Name: Graphiti Agent Memory
-Tools: 9 found
-  - add_memory
-  - search_nodes
-  - search_memory_facts
-  ... (etc)
-```
-
-This checks that the module can be imported and tools are registered.
-
-### 2. Runtime Validation (Essential!)
-
-```bash
-# Run interactive inspector - tests actual initialization
-uv run fastmcp dev src/server.py:create_server
-```
-
-This starts your server and opens an interactive web UI at `http://localhost:6274` where you can:
-- Test `get_status` tool to verify initialization
-- Call tools and see actual responses
-- Catch runtime errors before deployment
-
-**In the web UI, run:**
-1. Click "get_status" tool
-2. Expected: `{"status": "ok", "message": "Graphiti MCP server is running and connected to falkordb database"}`
-3. If you see `"Graphiti service not initialized"`, fix initialization issues before deploying
-
-**If validation fails:**
-- Check dependencies: `uv sync`
-- Verify database is running (see [CLAUDE.md:86](CLAUDE.md#L86))
-- Check environment variables in `.env`
-- Fix any import or connection errors
 
 ---
 

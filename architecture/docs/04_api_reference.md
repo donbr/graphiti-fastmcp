@@ -2,68 +2,28 @@
 
 ## Overview
 
-The Graphiti MCP Server exposes a comprehensive API for building knowledge graph-based AI agent memory systems. The API provides tools for adding information (episodes), searching entities (nodes) and relationships (facts), retrieving specific graph elements, and managing the knowledge graph lifecycle.
+The Graphiti MCP Server exposes a knowledge graph memory system through the Model Context Protocol (MCP). This API allows AI agents and applications to store, retrieve, and manage episodic memories in a graph structure with entities (nodes) and relationships (edges).
 
-This reference documents all public APIs including:
-- **MCP Tools**: FastMCP-decorated functions exposed to MCP clients
-- **Configuration Classes**: Pydantic models for server, LLM, embedder, and database configuration
-- **Response Types**: Type-safe response structures for all API operations
-- **Service Classes**: Core service implementations for Graphiti operations and queue management
-- **Factory Classes**: Factory methods for creating LLM, embedder, and database clients
-- **Utility Functions**: Helper functions for formatting and authentication
+**Architecture**: The API uses FastMCP for protocol implementation, follows a factory pattern for service initialization, and employs asynchronous queue-based processing for write operations.
 
-## Table of Contents
+**Protocol**: All API interactions use JSON-RPC 2.0 over HTTP or stdio transport. The MCP protocol handles tool discovery, invocation, and response serialization.
 
-1. [MCP Tools](#mcp-tools)
-   - [add_memory](#add_memory)
-   - [search_nodes](#search_nodes)
-   - [search_memory_facts](#search_memory_facts)
-   - [get_entity_edge](#get_entity_edge)
-   - [get_episodes](#get_episodes)
-   - [delete_entity_edge](#delete_entity_edge)
-   - [delete_episode](#delete_episode)
-   - [clear_graph](#clear_graph)
-   - [get_status](#get_status)
-2. [Configuration Classes](#configuration-classes)
-   - [GraphitiConfig](#graphiticonfig)
-   - [ServerConfig](#serverconfig)
-   - [LLMConfig](#llmconfig)
-   - [EmbedderConfig](#embedderconfig)
-   - [DatabaseConfig](#databaseconfig)
-   - [Provider Configurations](#provider-configurations)
-3. [Response Types](#response-types)
-   - [SuccessResponse](#successresponse)
-   - [ErrorResponse](#errorresponse)
-   - [NodeResult](#noderesult)
-   - [NodeSearchResponse](#nodesearchresponse)
-   - [FactSearchResponse](#factsearchresponse)
-   - [EpisodeSearchResponse](#episodesearchresponse)
-   - [StatusResponse](#statusresponse)
-4. [Service Classes](#service-classes)
-   - [GraphitiService](#graphitiservice)
-   - [QueueService](#queueservice)
-5. [Factory Classes](#factory-classes)
-   - [LLMClientFactory](#llmclientfactory)
-   - [EmbedderFactory](#embedderfactory)
-   - [DatabaseDriverFactory](#databasedriverfactory)
-6. [Utility Functions](#utility-functions)
-   - [format_node_result](#format_node_result)
-   - [format_fact_result](#format_fact_result)
-   - [create_azure_credential_token_provider](#create_azure_credential_token_provider)
-7. [Configuration Options](#configuration-options)
-8. [Usage Patterns](#usage-patterns)
-9. [Best Practices](#best-practices)
+**Knowledge Graph Model**:
+- **Episodes**: Units of content (text, messages, or JSON) added to memory
+- **Entities (Nodes)**: Extracted concepts, people, places, organizations, etc.
+- **Facts (Edges)**: Relationships between entities with temporal validity
+- **Groups**: Namespaces for organizing knowledge by context or user
 
 ---
 
 ## MCP Tools
 
-MCP Tools are the primary API endpoints exposed to MCP clients. All tools are async functions decorated with `@mcp.tool()`.
+The server exposes 9 public tools through the MCP protocol. All tools are registered via the `@server.tool()` decorator and accessible to connected MCP clients.
 
 ### add_memory
 
 ```python
-@mcp.tool()
+@server.tool()
 async def add_memory(
     name: str,
     episode_body: str,
@@ -71,953 +31,477 @@ async def add_memory(
     source: str = 'text',
     source_description: str = '',
     uuid: str | None = None,
-) -> SuccessResponse | ErrorResponse:
+) -> SuccessResponse | ErrorResponse
 ```
 
-**Description**: Add an episode to the knowledge graph. This is the primary way to add information. Episodes are processed asynchronously in the background, with sequential processing per group_id to avoid race conditions.
+**Description**: Add an episode to the knowledge graph memory. Episodes are processed asynchronously - this tool queues the episode for background processing and returns immediately. The LLM extracts entities and relationships from the episode content.
 
 **Parameters**:
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| name | str | Yes | Name of the episode (used for identification) |
-| episode_body | str | Yes | Content of the episode. For JSON source, must be properly escaped JSON string |
-| group_id | str \| None | No | Namespace for the graph. If not provided, uses default from config |
-| source | str | No | Source type: 'text' (default), 'json', or 'message' |
-| source_description | str | No | Description of where the content came from |
-| uuid | str \| None | No | Optional UUID for the episode (auto-generated if not provided) |
+| name | str | Yes | Episode name/title for identification |
+| episode_body | str | Yes | Content to add (text, JSON string, or message) |
+| group_id | str | No | Knowledge graph namespace (defaults to config value) |
+| source | str | No | Episode type: 'text', 'json', or 'message' (default: 'text') |
+| source_description | str | No | Metadata about the episode source |
+| uuid | str | No | Optional UUID for idempotent episode creation |
 
-**Returns**: `SuccessResponse | ErrorResponse`
-- Success: Confirms episode was queued for processing
-- Error: Contains error message if validation or queuing fails
+**Returns**:
+- `SuccessResponse`: `{"message": "Episode '{name}' queued for processing in group '{group_id}'"}`
+- `ErrorResponse`: `{"error": "Error queuing episode: {details}"}`
 
 **Example**:
 ```python
-# Adding plain text content
-result = await add_memory(
-    name="Company News",
-    episode_body="Acme Corp announced a new product line today.",
-    source="text",
-    source_description="news article",
-    group_id="company_news"
-)
+# Add a text episode
+result = await session.call_tool("add_memory", {
+    "name": "Meeting Notes",
+    "episode_body": "Discussed Q4 roadmap with Alice and Bob. Decided to prioritize feature X.",
+    "group_id": "project-alpha",
+    "source": "text",
+    "source_description": "Team meeting 2024-11-30"
+})
 
-# Adding structured JSON data
-result = await add_memory(
-    name="Customer Profile",
-    episode_body='{"company": {"name": "Acme Technologies"}, "products": [{"id": "P001", "name": "CloudSync"}]}',
-    source="json",
-    source_description="CRM data"
-)
-
-# Adding conversation messages
-result = await add_memory(
-    name="Support Chat",
-    episode_body="Customer asked about pricing for enterprise plan.",
-    source="message",
-    source_description="support ticket #1234"
-)
+# Add a message episode
+result = await session.call_tool("add_memory", {
+    "name": "User Conversation",
+    "episode_body": "User: What's the weather? Assistant: It's sunny today.",
+    "source": "message"
+})
 ```
 
-**Source**: `src/graphiti_mcp_server.py:324-407`
+**Behavior**:
+- Episodes are processed asynchronously via QueueService to prevent race conditions
+- Multiple episodes for the same group_id are processed sequentially
+- Different groups can process episodes in parallel
+- LLM extracts entities and relationships from episode_body
+- Returns success immediately; processing happens in background
+
+**Source**: `src/server.py:230-266`
 
 ---
 
 ### search_nodes
 
 ```python
-@mcp.tool()
+@server.tool()
 async def search_nodes(
     query: str,
     group_ids: list[str] | None = None,
     max_nodes: int = 10,
     entity_types: list[str] | None = None,
-) -> NodeSearchResponse | ErrorResponse:
+) -> NodeSearchResponse | ErrorResponse
 ```
 
-**Description**: Search for entity nodes (people, organizations, locations, etc.) in the knowledge graph using natural language queries. Uses hybrid search (vector + keyword) with reciprocal rank fusion (RRF).
+**Description**: Search for entity nodes in the knowledge graph using natural language queries. Uses hybrid search combining vector similarity and keyword matching with Reciprocal Rank Fusion (RRF) scoring.
 
 **Parameters**:
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | query | str | Yes | Natural language search query |
-| group_ids | list[str] \| None | No | Filter results to specific group IDs. Uses default if not provided |
+| group_ids | list[str] | No | List of group IDs to search (defaults to config group_id) |
 | max_nodes | int | No | Maximum number of nodes to return (default: 10) |
-| entity_types | list[str] \| None | No | Filter by entity type labels (e.g., ["Preference", "Organization"]) |
+| entity_types | list[str] | No | Filter by entity labels (e.g., ['Organization', 'Location']) |
 
-**Returns**: `NodeSearchResponse | ErrorResponse`
-- Success: List of matching nodes with details
-- Error: Contains error message if search fails
+**Returns**:
+- `NodeSearchResponse`: Contains message and list of `NodeResult` objects
+- `ErrorResponse`: `{"error": "Error searching nodes: {details}"}`
+
+**NodeResult Structure**:
+```typescript
+{
+  uuid: string,           // Unique identifier
+  name: string,           // Entity name
+  labels: string[],       // Entity types/labels
+  created_at: string,     // ISO 8601 timestamp
+  summary: string | null, // LLM-generated entity summary
+  group_id: string,       // Namespace
+  attributes: object      // Additional metadata (embeddings excluded)
+}
+```
 
 **Example**:
 ```python
-# Basic node search
-result = await search_nodes(
-    query="Find all people who work at Acme Corp"
-)
+# Basic search
+result = await session.call_tool("search_nodes", {
+    "query": "people working on AI projects",
+    "max_nodes": 5
+})
 
-# Search with filters
-result = await search_nodes(
-    query="technology companies",
-    entity_types=["Organization"],
-    max_nodes=5,
-    group_ids=["company_data"]
-)
-
-# Response structure:
-# {
-#     "message": "Nodes retrieved successfully",
-#     "nodes": [
-#         {
-#             "uuid": "abc123...",
-#             "name": "Acme Corp",
-#             "labels": ["Organization"],
-#             "created_at": "2024-01-15T10:30:00",
-#             "summary": "Technology company specializing in...",
-#             "group_id": "company_data",
-#             "attributes": {...}
-#         }
-#     ]
-# }
+# Filtered search
+result = await session.call_tool("search_nodes", {
+    "query": "technology companies",
+    "entity_types": ["Organization"],
+    "group_ids": ["project-alpha"],
+    "max_nodes": 10
+})
 ```
 
-**Source**: `src/graphiti_mcp_server.py:410-487`
+**Search Configuration**: Uses `NODE_HYBRID_SEARCH_RRF` from graphiti_core which combines:
+- Vector similarity search on entity embeddings
+- Keyword matching on entity names and summaries
+- RRF scoring to merge results
+
+**Source**: `src/server.py:268-312`
 
 ---
 
 ### search_memory_facts
 
 ```python
-@mcp.tool()
+@server.tool()
 async def search_memory_facts(
     query: str,
     group_ids: list[str] | None = None,
     max_facts: int = 10,
     center_node_uuid: str | None = None,
-) -> FactSearchResponse | ErrorResponse:
+) -> FactSearchResponse | ErrorResponse
 ```
 
-**Description**: Search for facts (relationships/edges) in the knowledge graph. Facts represent connections between entities and contain temporal metadata indicating when they were created and whether they've been invalidated.
+**Description**: Search for relationship facts (edges) between entities in the knowledge graph. Facts represent connections like "Alice WORKS_AT Acme Corp" with temporal validity.
 
 **Parameters**:
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| query | str | Yes | Natural language search query describing the relationship |
-| group_ids | list[str] \| None | No | Filter results to specific group IDs. Uses default if not provided |
-| max_facts | int | No | Maximum number of facts to return (default: 10, must be > 0) |
-| center_node_uuid | str \| None | No | UUID of a node to center the search around |
+| query | str | Yes | Natural language query for facts |
+| group_ids | list[str] | No | List of group IDs to search (defaults to config group_id) |
+| max_facts | int | No | Maximum number of facts to return (default: 10) |
+| center_node_uuid | str | No | UUID of entity to search around |
 
-**Returns**: `FactSearchResponse | ErrorResponse`
-- Success: List of matching facts with source/target nodes
-- Error: Contains error message if search fails
+**Returns**:
+- `FactSearchResponse`: Contains message and list of fact dictionaries
+- `ErrorResponse`: `{"error": "Error searching facts: {details}"}`
+
+**Fact Structure**:
+```typescript
+{
+  uuid: string,               // Unique identifier
+  source_node_uuid: string,   // Source entity UUID
+  target_node_uuid: string,   // Target entity UUID
+  name: string,               // Relationship type (e.g., "WORKS_AT")
+  fact: string,               // Human-readable fact description
+  valid_at: string,           // ISO 8601 timestamp when fact was valid
+  invalid_at: string | null,  // ISO 8601 timestamp when fact became invalid
+  created_at: string,         // ISO 8601 timestamp
+  group_id: string,           // Namespace
+  attributes: object          // Additional metadata (embeddings excluded)
+}
+```
 
 **Example**:
 ```python
 # Basic fact search
-result = await search_memory_facts(
-    query="Who are the founders of Acme Corp?"
-)
+result = await session.call_tool("search_memory_facts", {
+    "query": "employment relationships",
+    "max_facts": 10
+})
 
-# Search facts around a specific node
-result = await search_memory_facts(
-    query="relationships",
-    center_node_uuid="abc123...",
-    max_facts=5
-)
-
-# Response structure:
-# {
-#     "message": "Facts retrieved successfully",
-#     "facts": [
-#         {
-#             "uuid": "def456...",
-#             "name": "FOUNDED_BY",
-#             "fact": "John Smith founded Acme Corp in 2010",
-#             "valid_at": "2010-01-01T00:00:00",
-#             "invalid_at": null,
-#             "source_node_uuid": "abc123...",
-#             "target_node_uuid": "xyz789...",
-#             "group_id": "company_data"
-#         }
-#     ]
-# }
+# Search around specific entity
+result = await session.call_tool("search_memory_facts", {
+    "query": "collaborations",
+    "center_node_uuid": "alice-uuid-123",
+    "max_facts": 5
+})
 ```
 
-**Source**: `src/graphiti_mcp_server.py:490-541`
-
----
-
-### get_entity_edge
-
-```python
-@mcp.tool()
-async def get_entity_edge(uuid: str) -> dict[str, Any] | ErrorResponse:
-```
-
-**Description**: Retrieve a specific entity edge (fact/relationship) by its UUID. Useful when you have a fact UUID from previous searches.
-
-**Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| uuid | str | Yes | UUID of the entity edge to retrieve |
-
-**Returns**: `dict[str, Any] | ErrorResponse`
-- Success: Dictionary containing complete edge details
-- Error: Contains error message if edge not found or retrieval fails
-
-**Example**:
-```python
-# Get a specific fact by UUID
-edge = await get_entity_edge(uuid="def456...")
-
-# Response:
-# {
-#     "uuid": "def456...",
-#     "name": "WORKS_AT",
-#     "fact": "John Smith works at Acme Corp as CEO",
-#     "valid_at": "2020-01-15T10:30:00",
-#     "invalid_at": null,
-#     "source_node_uuid": "abc123...",
-#     "target_node_uuid": "xyz789...",
-#     "group_id": "company_data",
-#     "episodes": ["episode1", "episode2"]
-# }
-```
-
-**Source**: `src/graphiti_mcp_server.py:596-620`
+**Source**: `src/server.py:314-343`
 
 ---
 
 ### get_episodes
 
 ```python
-@mcp.tool()
+@server.tool()
 async def get_episodes(
     group_ids: list[str] | None = None,
     max_episodes: int = 10,
-) -> EpisodeSearchResponse | ErrorResponse:
+) -> EpisodeSearchResponse | ErrorResponse
 ```
 
-**Description**: Retrieve episodes from the knowledge graph. Episodes are the original content snippets that were added to the graph.
+**Description**: Retrieve episodes from the knowledge graph. Episodes are the original content units added via `add_memory`.
 
 **Parameters**:
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| group_ids | list[str] \| None | No | Filter to specific group IDs. Uses default if not provided |
+| group_ids | list[str] | No | List of group IDs to retrieve from (defaults to config group_id) |
 | max_episodes | int | No | Maximum number of episodes to return (default: 10) |
 
-**Returns**: `EpisodeSearchResponse | ErrorResponse`
-- Success: List of episodes with content and metadata
-- Error: Contains error message if retrieval fails
+**Returns**:
+- `EpisodeSearchResponse`: Contains message and list of episode dictionaries
+- `ErrorResponse`: `{"error": "Error getting episodes: {details}"}`
+
+**Episode Structure**:
+```typescript
+{
+  uuid: string,                // Unique identifier
+  name: string,                // Episode name/title
+  content: string,             // Original episode content
+  created_at: string,          // ISO 8601 timestamp
+  source: string,              // Episode type: 'text', 'json', or 'message'
+  source_description: string,  // Source metadata
+  group_id: string             // Namespace
+}
+```
 
 **Example**:
 ```python
 # Get recent episodes
-result = await get_episodes(max_episodes=5)
+result = await session.call_tool("get_episodes", {
+    "max_episodes": 5
+})
 
 # Get episodes from specific groups
-result = await get_episodes(
-    group_ids=["company_news", "product_updates"],
-    max_episodes=20
-)
-
-# Response structure:
-# {
-#     "message": "Episodes retrieved successfully",
-#     "episodes": [
-#         {
-#             "uuid": "ep123...",
-#             "name": "Company News",
-#             "content": "Acme Corp announced...",
-#             "created_at": "2024-01-15T10:30:00",
-#             "source": "text",
-#             "source_description": "news article",
-#             "group_id": "company_news"
-#         }
-#     ]
-# }
+result = await session.call_tool("get_episodes", {
+    "group_ids": ["project-alpha", "project-beta"],
+    "max_episodes": 20
+})
 ```
 
-**Source**: `src/graphiti_mcp_server.py:623-688`
+**Source**: `src/server.py:381-416`
+
+---
+
+### get_entity_edge
+
+```python
+@server.tool()
+async def get_entity_edge(uuid: str) -> dict[str, Any] | ErrorResponse
+```
+
+**Description**: Retrieve a specific relationship edge by its UUID.
+
+**Parameters**:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| uuid | str | Yes | UUID of the entity edge to retrieve |
+
+**Returns**:
+- Fact dictionary (same structure as `search_memory_facts` results)
+- `ErrorResponse`: `{"error": "Error getting entity edge: {details}"}`
+
+**Example**:
+```python
+result = await session.call_tool("get_entity_edge", {
+    "uuid": "edge-uuid-123"
+})
+```
+
+**Source**: `src/server.py:369-378`
 
 ---
 
 ### delete_entity_edge
 
 ```python
-@mcp.tool()
-async def delete_entity_edge(uuid: str) -> SuccessResponse | ErrorResponse:
+@server.tool()
+async def delete_entity_edge(uuid: str) -> SuccessResponse | ErrorResponse
 ```
 
-**Description**: Delete a specific entity edge (fact/relationship) from the knowledge graph by its UUID.
+**Description**: Delete a relationship edge from the knowledge graph.
 
 **Parameters**:
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | uuid | str | Yes | UUID of the entity edge to delete |
 
-**Returns**: `SuccessResponse | ErrorResponse`
-- Success: Confirms successful deletion
-- Error: Contains error message if edge not found or deletion fails
+**Returns**:
+- `SuccessResponse`: `{"message": "Entity edge with UUID {uuid} deleted successfully"}`
+- `ErrorResponse`: `{"error": "Error deleting entity edge: {details}"}`
 
 **Example**:
 ```python
-# Delete a specific fact
-result = await delete_entity_edge(uuid="def456...")
-# {"message": "Entity edge with UUID def456... deleted successfully"}
+result = await session.call_tool("delete_entity_edge", {
+    "uuid": "edge-uuid-123"
+})
 ```
 
-**Source**: `src/graphiti_mcp_server.py:544-567`
+**Source**: `src/server.py:345-355`
 
 ---
 
 ### delete_episode
 
 ```python
-@mcp.tool()
-async def delete_episode(uuid: str) -> SuccessResponse | ErrorResponse:
+@server.tool()
+async def delete_episode(uuid: str) -> SuccessResponse | ErrorResponse
 ```
 
-**Description**: Delete a specific episode from the knowledge graph by its UUID.
+**Description**: Delete an episode from the knowledge graph. This removes the episode node but may not remove entities or facts extracted from it.
 
 **Parameters**:
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | uuid | str | Yes | UUID of the episode to delete |
 
-**Returns**: `SuccessResponse | ErrorResponse`
-- Success: Confirms successful deletion
-- Error: Contains error message if episode not found or deletion fails
+**Returns**:
+- `SuccessResponse`: `{"message": "Episode with UUID {uuid} deleted successfully"}`
+- `ErrorResponse`: `{"error": "Error deleting episode: {details}"}`
 
 **Example**:
 ```python
-# Delete an episode
-result = await delete_episode(uuid="ep123...")
-# {"message": "Episode with UUID ep123... deleted successfully"}
+result = await session.call_tool("delete_episode", {
+    "uuid": "episode-uuid-123"
+})
 ```
 
-**Source**: `src/graphiti_mcp_server.py:570-593`
+**Source**: `src/server.py:357-367`
 
 ---
 
 ### clear_graph
 
 ```python
-@mcp.tool()
-async def clear_graph(
-    group_ids: list[str] | None = None
-) -> SuccessResponse | ErrorResponse:
+@server.tool()
+async def clear_graph(group_ids: list[str] | None = None) -> SuccessResponse | ErrorResponse
 ```
 
-**Description**: Clear all data from the knowledge graph for specified group IDs. This is a destructive operation that removes all nodes, edges, and episodes.
+**Description**: Clear all data from the knowledge graph for specified group IDs. This is a destructive operation that removes all episodes, entities, and facts for the specified groups.
 
 **Parameters**:
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| group_ids | list[str] \| None | No | List of group IDs to clear. If not provided, clears the default group |
+| group_ids | list[str] | No | List of group IDs to clear (defaults to config group_id) |
 
-**Returns**: `SuccessResponse | ErrorResponse`
-- Success: Confirms successful clearing
-- Error: Contains error message if no group IDs specified or operation fails
+**Returns**:
+- `SuccessResponse`: `{"message": "Graph data cleared for group IDs: {group_ids}"}`
+- `ErrorResponse`: `{"error": "Error clearing graph: {details}"}`
 
 **Example**:
 ```python
-# Clear default group
-result = await clear_graph()
-
 # Clear specific groups
-result = await clear_graph(group_ids=["test_data", "old_data"])
-# {"message": "Graph data cleared successfully for group IDs: test_data, old_data"}
+result = await session.call_tool("clear_graph", {
+    "group_ids": ["test-group", "temp-data"]
+})
+
+# Clear default group
+result = await session.call_tool("clear_graph", {})
 ```
 
-**Source**: `src/graphiti_mcp_server.py:691-723`
+**Warning**: This operation is irreversible. All data for the specified groups will be permanently deleted.
+
+**Source**: `src/server.py:418-432`
 
 ---
 
 ### get_status
 
 ```python
-@mcp.tool()
-async def get_status() -> StatusResponse:
+@server.tool()
+async def get_status() -> StatusResponse
 ```
 
-**Description**: Get the status of the Graphiti MCP server and verify database connectivity.
+**Description**: Health check for the Graphiti MCP server and database connection. Tests database connectivity by executing a simple query.
 
 **Parameters**: None
 
-**Returns**: `StatusResponse`
-- Contains status ("ok" or "error") and descriptive message
+**Returns**:
+- `StatusResponse`: `{"status": "ok"|"error", "message": "..."}`
 
 **Example**:
 ```python
-status = await get_status()
-# {
-#     "status": "ok",
-#     "message": "Graphiti MCP server is running and connected to falkordb database"
-# }
+result = await session.call_tool("get_status", {})
+# Response: {"status": "ok", "message": "Graphiti MCP server is running and connected to falkordb database"}
 ```
 
-**Source**: `src/graphiti_mcp_server.py:726-756`
+**Use Cases**:
+- Pre-flight checks before executing operations
+- Monitoring and health checks
+- Debugging connection issues
+
+**Source**: `src/server.py:434-455`
 
 ---
 
-## Configuration Classes
-
-Configuration classes use Pydantic models with support for YAML files, environment variables, and CLI arguments.
-
-### GraphitiConfig
-
-```python
-class GraphitiConfig(BaseSettings):
-    server: ServerConfig
-    llm: LLMConfig
-    embedder: EmbedderConfig
-    database: DatabaseConfig
-    graphiti: GraphitiAppConfig
-    destroy_graph: bool = False
-```
-
-**Description**: Main configuration class that combines all subsystem configurations. Supports loading from YAML files with environment variable expansion.
-
-**Fields**:
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| server | ServerConfig | ServerConfig() | Server transport and network settings |
-| llm | LLMConfig | LLMConfig() | LLM provider and model configuration |
-| embedder | EmbedderConfig | EmbedderConfig() | Embedder provider and model configuration |
-| database | DatabaseConfig | DatabaseConfig() | Database provider and connection settings |
-| graphiti | GraphitiAppConfig | GraphitiAppConfig() | Graphiti-specific settings (group_id, entity types) |
-| destroy_graph | bool | False | Clear all graph data on startup (use with caution) |
-
-**Configuration Priority** (highest to lowest):
-1. CLI arguments
-2. Environment variables
-3. YAML configuration file
-4. Default values
-
-**Methods**:
-
-#### apply_cli_overrides
-```python
-def apply_cli_overrides(self, args) -> None:
-```
-Apply command-line argument overrides to configuration.
-
-**Example**:
-```python
-# Load from YAML with environment variable expansion
-config = GraphitiConfig()
-
-# Apply CLI overrides
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--llm-provider', choices=['openai', 'anthropic'])
-parser.add_argument('--model', help='Model name')
-args = parser.parse_args()
-config.apply_cli_overrides(args)
-
-# Configuration is now ready
-print(f"Using LLM: {config.llm.provider} / {config.llm.model}")
-```
-
-**Source**: `src/config/schema.py:230-293`
-
----
-
-### ServerConfig
-
-```python
-class ServerConfig(BaseModel):
-    transport: str = 'http'
-    host: str = '0.0.0.0'
-    port: int = 8000
-```
-
-**Description**: Server transport and network configuration.
-
-**Fields**:
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| transport | str | 'http' | Transport type: 'http' (recommended), 'stdio', or 'sse' (deprecated) |
-| host | str | '0.0.0.0' | Host address to bind to |
-| port | int | 8000 | Port number to bind to |
-
-**Example**:
-```yaml
-# In config.yaml
-server:
-  transport: "http"
-  host: "0.0.0.0"
-  port: 8000
-```
-
-**Source**: `src/config/schema.py:76-85`
-
----
-
-### LLMConfig
-
-```python
-class LLMConfig(BaseModel):
-    provider: str = 'openai'
-    model: str = 'gpt-4.1'
-    temperature: float | None = None
-    max_tokens: int = 4096
-    providers: LLMProvidersConfig = LLMProvidersConfig()
-```
-
-**Description**: Configuration for Language Model provider and settings.
-
-**Fields**:
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| provider | str | 'openai' | LLM provider: 'openai', 'azure_openai', 'anthropic', 'gemini', 'groq' |
-| model | str | 'gpt-4.1' | Model name to use |
-| temperature | float \| None | None | Sampling temperature (0.0-2.0). None for reasoning models |
-| max_tokens | int | 4096 | Maximum tokens in response |
-| providers | LLMProvidersConfig | {} | Provider-specific configurations |
-
-**Example**:
-```yaml
-# In config.yaml
-llm:
-  provider: "openai"
-  model: "gpt-5-mini"
-  temperature: null  # Auto-selected based on model type
-  max_tokens: 4096
-
-  providers:
-    openai:
-      api_key: ${OPENAI_API_KEY}
-      api_url: "https://api.openai.com/v1"
-```
-
-**Source**: `src/config/schema.py:146-156`
-
----
-
-### EmbedderConfig
-
-```python
-class EmbedderConfig(BaseModel):
-    provider: str = 'openai'
-    model: str = 'text-embedding-3-small'
-    dimensions: int = 1536
-    providers: EmbedderProvidersConfig = EmbedderProvidersConfig()
-```
-
-**Description**: Configuration for embedding model provider and settings.
-
-**Fields**:
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| provider | str | 'openai' | Embedder provider: 'openai', 'azure_openai', 'gemini', 'voyage' |
-| model | str | 'text-embedding-3-small' | Embedding model name |
-| dimensions | int | 1536 | Embedding vector dimensions |
-| providers | EmbedderProvidersConfig | {} | Provider-specific configurations |
-
-**Example**:
-```yaml
-# In config.yaml
-embedder:
-  provider: "openai"
-  model: "text-embedding-3-small"
-  dimensions: 1536
-
-  providers:
-    openai:
-      api_key: ${OPENAI_API_KEY}
-```
-
-**Source**: `src/config/schema.py:167-174`
-
----
-
-### DatabaseConfig
-
-```python
-class DatabaseConfig(BaseModel):
-    provider: str = 'falkordb'
-    providers: DatabaseProvidersConfig = DatabaseProvidersConfig()
-```
-
-**Description**: Configuration for graph database provider and connection settings.
-
-**Fields**:
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| provider | str | 'falkordb' | Database provider: 'neo4j', 'falkordb' |
-| providers | DatabaseProvidersConfig | {} | Provider-specific configurations |
-
-**Example**:
-```yaml
-# In config.yaml
-database:
-  provider: "falkordb"
-
-  providers:
-    falkordb:
-      uri: ${FALKORDB_URI:redis://localhost:6379}
-      username: ${FALKORDB_USER:}
-      password: ${FALKORDB_PASSWORD:}
-      database: ${FALKORDB_DATABASE:default_db}
-
-    neo4j:
-      uri: ${NEO4J_URI:bolt://localhost:7687}
-      username: ${NEO4J_USER:neo4j}
-      password: ${NEO4J_PASSWORD}
-      database: ${NEO4J_DATABASE:neo4j}
-```
-
-**Source**: `src/config/schema.py:202-207`
-
----
-
-### Provider Configurations
-
-#### OpenAIProviderConfig
-```python
-class OpenAIProviderConfig(BaseModel):
-    api_key: str | None = None
-    api_url: str = 'https://api.openai.com/v1'
-    organization_id: str | None = None
-```
-
-**Source**: `src/config/schema.py:87-93`
-
-#### AzureOpenAIProviderConfig
-```python
-class AzureOpenAIProviderConfig(BaseModel):
-    api_key: str | None = None
-    api_url: str | None = None
-    api_version: str = '2024-10-21'
-    deployment_name: str | None = None
-    use_azure_ad: bool = False
-```
-
-**Source**: `src/config/schema.py:95-103`
-
-#### AnthropicProviderConfig
-```python
-class AnthropicProviderConfig(BaseModel):
-    api_key: str | None = None
-    api_url: str = 'https://api.anthropic.com'
-    max_retries: int = 3
-```
-
-**Source**: `src/config/schema.py:105-111`
-
-#### GeminiProviderConfig
-```python
-class GeminiProviderConfig(BaseModel):
-    api_key: str | None = None
-    project_id: str | None = None
-    location: str = 'us-central1'
-```
-
-**Source**: `src/config/schema.py:113-119`
-
-#### GroqProviderConfig
-```python
-class GroqProviderConfig(BaseModel):
-    api_key: str | None = None
-    api_url: str = 'https://api.groq.com/openai/v1'
-```
-
-**Source**: `src/config/schema.py:121-126`
-
-#### VoyageProviderConfig
-```python
-class VoyageProviderConfig(BaseModel):
-    api_key: str | None = None
-    api_url: str = 'https://api.voyageai.com/v1'
-    model: str = 'voyage-3'
-```
-
-**Source**: `src/config/schema.py:128-134`
-
-#### Neo4jProviderConfig
-```python
-class Neo4jProviderConfig(BaseModel):
-    uri: str = 'bolt://localhost:7687'
-    username: str = 'neo4j'
-    password: str | None = None
-    database: str = 'neo4j'
-    use_parallel_runtime: bool = False
-```
-
-**Source**: `src/config/schema.py:176-184`
-
-#### FalkorDBProviderConfig
-```python
-class FalkorDBProviderConfig(BaseModel):
-    uri: str = 'redis://localhost:6379'
-    username: str | None = None
-    password: str | None = None
-    database: str = 'default_db'
-```
-
-**Source**: `src/config/schema.py:186-193`
-
-#### GraphitiAppConfig
-```python
-class GraphitiAppConfig(BaseModel):
-    group_id: str = 'main'
-    episode_id_prefix: str | None = ''
-    user_id: str = 'mcp_user'
-    entity_types: list[EntityTypeConfig] = []
-```
-
-**Fields**:
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| group_id | str | 'main' | Default namespace for graph data |
-| episode_id_prefix | str \| None | '' | Optional prefix for episode IDs |
-| user_id | str | 'mcp_user' | User ID for tracking operations |
-| entity_types | list[EntityTypeConfig] | [] | Custom entity type definitions |
-
-**Source**: `src/config/schema.py:216-228`
-
-#### EntityTypeConfig
-```python
-class EntityTypeConfig(BaseModel):
-    name: str
-    description: str
-```
-
-**Description**: Defines custom entity types for extraction from episodes.
-
-**Example**:
-```yaml
-graphiti:
-  entity_types:
-    - name: "Preference"
-      description: "User preferences, choices, or selections"
-    - name: "Organization"
-      description: "Companies, institutions, or groups"
-```
-
-**Source**: `src/config/schema.py:209-214`
-
----
-
-## Response Types
-
-All response types are TypedDict classes for type-safe API responses.
-
-### SuccessResponse
-
-```python
-class SuccessResponse(TypedDict):
-    message: str
-```
-
-**Description**: Standard success response containing a descriptive message.
-
-**Fields**:
-| Field | Type | Description |
-|-------|------|-------------|
-| message | str | Success message describing the operation result |
-
-**Source**: `src/models/response_types.py:12-14`
-
----
-
-### ErrorResponse
-
-```python
-class ErrorResponse(TypedDict):
-    error: str
-```
-
-**Description**: Standard error response containing error details.
-
-**Fields**:
-| Field | Type | Description |
-|-------|------|-------------|
-| error | str | Error message describing what went wrong |
-
-**Source**: `src/models/response_types.py:8-10`
-
----
-
-### NodeResult
-
-```python
-class NodeResult(TypedDict):
-    uuid: str
-    name: str
-    labels: list[str]
-    created_at: str | None
-    summary: str | None
-    group_id: str
-    attributes: dict[str, Any]
-```
-
-**Description**: Represents a single entity node from the knowledge graph.
-
-**Fields**:
-| Field | Type | Description |
-|-------|------|-------------|
-| uuid | str | Unique identifier for the node |
-| name | str | Human-readable name of the entity |
-| labels | list[str] | Entity type labels (e.g., ["Organization"], ["Preference"]) |
-| created_at | str \| None | ISO-8601 timestamp of node creation |
-| summary | str \| None | AI-generated summary of the entity |
-| group_id | str | Group/namespace the node belongs to |
-| attributes | dict[str, Any] | Additional properties (excludes embeddings) |
-
-**Source**: `src/models/response_types.py:16-24`
-
----
-
-### NodeSearchResponse
-
-```python
-class NodeSearchResponse(TypedDict):
-    message: str
-    nodes: list[NodeResult]
-```
-
-**Description**: Response from node search operations.
-
-**Fields**:
-| Field | Type | Description |
-|-------|------|-------------|
-| message | str | Status message |
-| nodes | list[NodeResult] | List of matching nodes |
-
-**Source**: `src/models/response_types.py:26-29`
-
----
-
-### FactSearchResponse
-
-```python
-class FactSearchResponse(TypedDict):
-    message: str
-    facts: list[dict[str, Any]]
-```
-
-**Description**: Response from fact (edge) search operations.
-
-**Fields**:
-| Field | Type | Description |
-|-------|------|-------------|
-| message | str | Status message |
-| facts | list[dict[str, Any]] | List of matching facts/edges. Each fact contains: uuid, name, fact, valid_at, invalid_at, source_node_uuid, target_node_uuid, group_id |
-
-**Source**: `src/models/response_types.py:31-34`
-
----
-
-### EpisodeSearchResponse
-
-```python
-class EpisodeSearchResponse(TypedDict):
-    message: str
-    episodes: list[dict[str, Any]]
-```
-
-**Description**: Response from episode retrieval operations.
-
-**Fields**:
-| Field | Type | Description |
-|-------|------|-------------|
-| message | str | Status message |
-| episodes | list[dict[str, Any]] | List of episodes. Each episode contains: uuid, name, content, created_at, source, source_description, group_id |
-
-**Source**: `src/models/response_types.py:36-39`
-
----
-
-### StatusResponse
-
-```python
-class StatusResponse(TypedDict):
-    status: str
-    message: str
-```
-
-**Description**: Response from server status check.
-
-**Fields**:
-| Field | Type | Description |
-|-------|------|-------------|
-| status | str | Status: "ok" or "error" |
-| message | str | Detailed status message |
-
-**Source**: `src/models/response_types.py:41-44`
-
----
-
-## Service Classes
+## Services
 
 ### GraphitiService
 
 ```python
 class GraphitiService:
-    def __init__(self, config: GraphitiConfig, semaphore_limit: int = 10):
-        ...
+    """Service class managing Graphiti client lifecycle and initialization."""
 ```
 
-**Description**: Core service managing Graphiti client lifecycle and operations. Handles initialization of LLM, embedder, and database clients using factory pattern.
+**Description**: Manages the Graphiti Core client instance, handling initialization with LLM, embedder, and database components created via factory pattern. Provides access to the initialized client for tool handlers.
+
+**Constructor**:
+```python
+def __init__(self, config: GraphitiConfig, semaphore_limit: int = 10)
+```
+
+**Parameters**:
+- `config`: GraphitiConfig instance with all provider settings
+- `semaphore_limit`: Maximum concurrent operations (default: 10)
 
 **Attributes**:
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| config | GraphitiConfig | Configuration object |
-| semaphore_limit | int | Max concurrent Graphiti operations |
-| semaphore | asyncio.Semaphore | Semaphore for concurrency control |
-| client | Graphiti \| None | Initialized Graphiti client |
-| entity_types | dict \| None | Custom entity type definitions |
+- `client`: Initialized Graphiti instance (None until initialize() called)
+- `entity_types`: Dictionary of custom Pydantic entity models
+- `semaphore`: Asyncio semaphore for concurrency control
 
 **Methods**:
 
-#### initialize
+#### initialize()
+
 ```python
-async def initialize(self) -> None:
+async def initialize() -> None
 ```
 
-**Description**: Initialize the Graphiti client with factory-created LLM, embedder, and database components. Builds indices and constraints. Provides detailed error messages for connection failures.
+**Description**: Initialize the Graphiti client with factory-created LLM, embedder, and database drivers. Builds custom entity types from configuration and establishes database connection.
+
+**Process**:
+1. Create LLM client via `LLMClientFactory.create(config.llm)`
+2. Create embedder client via `EmbedderFactory.create(config.embedder)`
+3. Create database config via `DatabaseDriverFactory.create_config(config.database)`
+4. Build custom entity type models from configuration
+5. Initialize Graphiti client with all components
+6. Build database indices and constraints
 
 **Raises**:
-- `RuntimeError`: If database is not accessible (with provider-specific help)
-- `Exception`: For other initialization failures
+- `RuntimeError`: If initialization fails
+- `ValueError`: If API keys missing or invalid configuration
 
 **Example**:
 ```python
 config = GraphitiConfig()
 service = GraphitiService(config, semaphore_limit=10)
 await service.initialize()
-# Logs: Successfully initialized Graphiti client
-# Logs: Using LLM provider: openai / gpt-5-mini
-# Logs: Using Embedder provider: openai
-# Logs: Using database: falkordb
 ```
 
-**Source**: `src/graphiti_mcp_server.py:172-313`
+**Source**: `src/server.py:98-160`
 
-#### get_client
+---
+
+#### get_client()
+
 ```python
-async def get_client(self) -> Graphiti:
+async def get_client() -> Graphiti
 ```
 
-**Description**: Get the Graphiti client, initializing if necessary. Safe to call multiple times.
+**Description**: Retrieve the initialized Graphiti client instance. Calls `initialize()` if not already initialized.
 
-**Returns**: `Graphiti` - Initialized Graphiti client instance
+**Returns**: Initialized Graphiti Core client
 
 **Raises**:
-- `RuntimeError`: If client initialization fails
+- `RuntimeError`: If client initialization failed
 
 **Example**:
 ```python
 client = await service.get_client()
-# Use client for graph operations
+results = await client.search_("AI companies")
 ```
 
-**Source**: `src/graphiti_mcp_server.py:314-321`
+**Source**: `src/server.py:162-167`
 
-**Source**: `src/graphiti_mcp_server.py:162-321`
+---
+
+**Service Initialization Pattern**:
+```python
+# In create_server() factory
+config = GraphitiConfig()
+graphiti_service = GraphitiService(config, SEMAPHORE_LIMIT)
+await graphiti_service.initialize()
+client = await graphiti_service.get_client()
+```
+
+**Source**: `src/server.py:88-168`
 
 ---
 
@@ -1025,39 +509,48 @@ client = await service.get_client()
 
 ```python
 class QueueService:
-    def __init__(self):
-        ...
+    """Service for managing sequential episode processing queues by group_id."""
 ```
 
-**Description**: Manages sequential episode processing queues by group_id. Ensures episodes for the same group are processed in order to avoid race conditions while allowing parallel processing across different groups.
+**Description**: Manages asynchronous, sequential processing of episodes per group_id to prevent race conditions in the knowledge graph. Each group has its own queue and background worker.
+
+**Constructor**:
+```python
+def __init__(self)
+```
 
 **Attributes**:
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| _episode_queues | dict[str, asyncio.Queue] | Queues per group_id |
-| _queue_workers | dict[str, bool] | Worker status per group_id |
-| _graphiti_client | Any | Graphiti client for processing |
+- `_episode_queues`: Dictionary of asyncio.Queue instances per group_id
+- `_queue_workers`: Dictionary tracking worker status per group_id
+- `_graphiti_client`: Graphiti client instance (set via initialize())
 
 **Methods**:
 
-#### initialize
+#### initialize()
+
 ```python
-async def initialize(self, graphiti_client: Any) -> None:
+async def initialize(graphiti_client: Any) -> None
 ```
 
-**Description**: Initialize the queue service with a Graphiti client.
+**Description**: Initialize the queue service with a Graphiti client instance.
 
 **Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| graphiti_client | Any | Yes | Graphiti client instance for processing episodes |
+- `graphiti_client`: Initialized Graphiti client for episode processing
 
-**Source**: `src/services/queue_service.py:92-100`
+**Example**:
+```python
+queue_service = QueueService()
+await queue_service.initialize(graphiti_client)
+```
 
-#### add_episode
+**Source**: `src/services/queue_service.py:92-99`
+
+---
+
+#### add_episode()
+
 ```python
 async def add_episode(
-    self,
     group_id: str,
     name: str,
     content: str,
@@ -1065,156 +558,198 @@ async def add_episode(
     episode_type: Any,
     entity_types: Any,
     uuid: str | None,
-) -> int:
+) -> int
 ```
 
-**Description**: Add an episode for asynchronous processing. Episodes are queued and processed sequentially per group_id.
+**Description**: Queue an episode for asynchronous processing. Creates a closure that captures episode parameters and adds it to the group's queue. Starts a background worker if not already running.
 
 **Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| group_id | str | Yes | Group ID namespace |
-| name | str | Yes | Episode name |
-| content | str | Yes | Episode content |
-| source_description | str | Yes | Source description |
-| episode_type | Any | Yes | EpisodeType enum value |
-| entity_types | Any | Yes | Entity types for extraction |
-| uuid | str \| None | Yes | Episode UUID (can be None) |
+| Name | Type | Description |
+|------|------|-------------|
+| group_id | str | Group ID for the episode |
+| name | str | Episode name/title |
+| content | str | Episode content |
+| source_description | str | Source metadata |
+| episode_type | EpisodeType | Type enum (text, json, message) |
+| entity_types | dict | Custom entity type models |
+| uuid | str | Optional episode UUID |
 
-**Returns**: `int` - Position in the queue
+**Returns**: Queue position (int) - number of items in queue after adding
 
 **Raises**:
-- `RuntimeError`: If service not initialized
+- `RuntimeError`: If queue service not initialized
 
 **Example**:
 ```python
-queue_service = QueueService()
-await queue_service.initialize(graphiti_client)
-
 position = await queue_service.add_episode(
-    group_id="main",
+    group_id="project-alpha",
     name="Meeting Notes",
-    content="Discussed Q4 strategy...",
-    source_description="Zoom meeting",
+    content="Discussed roadmap...",
+    source_description="Team meeting",
     episode_type=EpisodeType.text,
-    entity_types=custom_types,
-    uuid="abc123"
+    entity_types=custom_entity_types,
+    uuid=None
 )
-# Returns: 1 (first in queue for this group_id)
+# Returns: 1 (first in queue)
 ```
 
-**Source**: `src/services/queue_service.py:101-153`
+**Processing Flow**:
+1. Creates closure function capturing episode parameters
+2. Adds closure to group's asyncio.Queue
+3. Starts background worker if not running
+4. Returns immediately (async processing)
+5. Worker processes episodes sequentially
 
-#### add_episode_task
+**Source**: `src/services/queue_service.py:101-152`
+
+---
+
+#### add_episode_task()
+
 ```python
 async def add_episode_task(
-    self, group_id: str, process_func: Callable[[], Awaitable[None]]
-) -> int:
+    group_id: str,
+    process_func: Callable[[], Awaitable[None]]
+) -> int
 ```
 
-**Description**: Add a generic episode processing task to the queue. Lower-level method used internally by add_episode.
+**Description**: Low-level method to add a processing function to the queue. Used internally by `add_episode()`.
 
 **Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| group_id | str | Yes | Group ID for the task |
-| process_func | Callable[[], Awaitable[None]] | Yes | Async function to process the episode |
+- `group_id`: Group ID for the queue
+- `process_func`: Async function to execute
 
-**Returns**: `int` - Position in queue
+**Returns**: Queue position
 
-**Source**: `src/services/queue_service.py:24-48`
+**Source**: `src/services/queue_service.py:24-47`
 
-#### get_queue_size
+---
+
+#### get_queue_size()
+
 ```python
-def get_queue_size(self, group_id: str) -> int:
+def get_queue_size(group_id: str) -> int
 ```
 
-**Description**: Get the current queue size for a group_id.
+**Description**: Get current queue size for a group_id.
 
-**Returns**: `int` - Number of episodes waiting in queue
+**Parameters**:
+- `group_id`: Group ID to check
 
-**Source**: `src/services/queue_service.py:82-87`
+**Returns**: Number of pending episodes (0 if queue doesn't exist)
 
-#### is_worker_running
+**Example**:
 ```python
-def is_worker_running(self, group_id: str) -> bool:
+size = queue_service.get_queue_size("project-alpha")
+print(f"Queue size: {size}")
 ```
 
-**Description**: Check if a worker is running for a group_id.
+**Source**: `src/services/queue_service.py:82-86`
 
-**Returns**: `bool` - True if worker is active
+---
 
-**Source**: `src/services/queue_service.py:88-91`
+#### is_worker_running()
+
+```python
+def is_worker_running(group_id: str) -> bool
+```
+
+**Description**: Check if a background worker is running for a group_id.
+
+**Parameters**:
+- `group_id`: Group ID to check
+
+**Returns**: True if worker is active, False otherwise
+
+**Example**:
+```python
+if queue_service.is_worker_running("project-alpha"):
+    print("Worker is processing episodes")
+```
+
+**Source**: `src/services/queue_service.py:88-90`
+
+---
+
+**Queue Architecture**:
+- **Sequential Processing**: Episodes for same group_id processed one at a time
+- **Parallel Groups**: Different groups can process simultaneously
+- **Background Workers**: Long-lived asyncio tasks that wait for queue items
+- **Error Isolation**: Worker errors don't crash other workers or affect client responses
 
 **Source**: `src/services/queue_service.py:12-153`
 
 ---
 
-## Factory Classes
+## Factories
 
-Factory classes create configured instances of LLM clients, embedders, and database drivers.
+Factories create provider-specific client instances based on configuration. All factories support multiple providers with conditional imports for optional dependencies.
 
 ### LLMClientFactory
 
 ```python
 class LLMClientFactory:
-    @staticmethod
-    def create(config: LLMConfig) -> LLMClient:
-        ...
+    """Factory for creating LLM clients based on configuration."""
 ```
 
-**Description**: Factory for creating LLM clients based on configuration. Supports OpenAI, Azure OpenAI, Anthropic, Gemini, and Groq providers.
+**Description**: Creates LLM client instances for text generation and entity extraction. Supports multiple providers with provider-specific configurations.
 
-**Methods**:
+#### create()
 
-#### create
 ```python
 @staticmethod
-def create(config: LLMConfig) -> LLMClient:
+def create(config: LLMConfig) -> LLMClient
 ```
 
-**Description**: Create an LLM client based on configured provider. Automatically selects appropriate small model and handles reasoning model configuration.
+**Description**: Create an LLM client based on the configured provider.
 
 **Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| config | LLMConfig | Yes | LLM configuration object |
+- `config`: LLMConfig with provider, model, and provider-specific settings
 
-**Returns**: `LLMClient` - Provider-specific LLM client instance
+**Returns**: LLMClient instance (OpenAIClient, AzureOpenAILLMClient, AnthropicClient, GeminiClient, or GroqClient)
 
 **Raises**:
-- `ValueError`: If provider not supported or configuration missing
-- `ValueError`: If API key not configured
+- `ValueError`: If provider not supported or API key missing
+- `ImportError`: If provider library not installed
 
 **Supported Providers**:
-- `openai`: OpenAI API (including GPT-5 reasoning models)
-- `azure_openai`: Azure OpenAI Service (with optional Azure AD auth)
-- `anthropic`: Anthropic Claude models
-- `gemini`: Google Gemini models
-- `groq`: Groq API
+
+| Provider | Models | Configuration Required |
+|----------|--------|------------------------|
+| openai | gpt-4.1, gpt-4.1-mini, gpt-5, gpt-5-nano, o1, o3 | api_key |
+| azure_openai | All Azure OpenAI models | api_key or use_azure_ad, api_url, deployment_name |
+| anthropic | claude-3-opus, claude-3-sonnet, claude-3-haiku | api_key |
+| gemini | gemini-pro, gemini-ultra | api_key, project_id (optional) |
+| groq | llama-3.1-70b, mixtral-8x7b | api_key |
+
+**Example Configuration**:
+```yaml
+llm:
+  provider: openai
+  model: gpt-4.1
+  temperature: 0.7
+  max_tokens: 4096
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}
+```
+
+**Special Handling**:
+- **Reasoning Models** (gpt-5, o1, o3): Sets `reasoning='minimal'` and `verbosity='low'`
+- **Small Model Selection**: Automatically selects appropriate small model based on main model type
+- **Azure AD Authentication**: Supports managed identity via `use_azure_ad: true`
 
 **Example**:
 ```python
-from config.schema import LLMConfig, OpenAIProviderConfig
+from config.schema import LLMConfig
+from services.factories import LLMClientFactory
 
-# Configure OpenAI
-llm_config = LLMConfig(
+config = LLMConfig(
     provider="openai",
-    model="gpt-5-mini",
-    temperature=None,  # Auto for reasoning models
-    max_tokens=4096
+    model="gpt-4.1",
+    temperature=0.7
 )
-llm_config.providers.openai = OpenAIProviderConfig(
-    api_key="sk-..."
-)
-
-# Create client
-llm_client = LLMClientFactory.create(llm_config)
-
-# For reasoning models (gpt-5*, o1*, o3*), the factory automatically:
-# - Sets reasoning='minimal' and verbosity='low'
-# - Uses gpt-5-nano as small_model
-# For non-reasoning models, these parameters are disabled
+llm_client = LLMClientFactory.create(config)
 ```
 
 **Source**: `src/services/factories.py:100-251`
@@ -1225,56 +760,60 @@ llm_client = LLMClientFactory.create(llm_config)
 
 ```python
 class EmbedderFactory:
-    @staticmethod
-    def create(config: EmbedderConfig) -> EmbedderClient:
-        ...
+    """Factory for creating Embedder clients based on configuration."""
 ```
 
-**Description**: Factory for creating embedding clients based on configuration. Supports OpenAI, Azure OpenAI, Gemini, and Voyage providers.
+**Description**: Creates embedder client instances for generating vector embeddings. Embeddings enable semantic similarity search in the knowledge graph.
 
-**Methods**:
+#### create()
 
-#### create
 ```python
 @staticmethod
-def create(config: EmbedderConfig) -> EmbedderClient:
+def create(config: EmbedderConfig) -> EmbedderClient
 ```
 
-**Description**: Create an embedder client based on configured provider.
+**Description**: Create an embedder client based on the configured provider.
 
 **Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| config | EmbedderConfig | Yes | Embedder configuration object |
+- `config`: EmbedderConfig with provider, model, dimensions, and provider-specific settings
 
-**Returns**: `EmbedderClient` - Provider-specific embedder client instance
+**Returns**: EmbedderClient instance (OpenAIEmbedder, AzureOpenAIEmbedderClient, GeminiEmbedder, or VoyageAIEmbedder)
 
 **Raises**:
-- `ValueError`: If provider not supported or configuration missing
-- `ValueError`: If API key not configured
+- `ValueError`: If provider not supported or API key missing
+- `ImportError`: If provider library not installed
 
 **Supported Providers**:
-- `openai`: OpenAI embeddings (text-embedding-3-small, text-embedding-3-large)
-- `azure_openai`: Azure OpenAI embeddings (with optional Azure AD auth)
-- `gemini`: Google Gemini embeddings (text-embedding-004)
-- `voyage`: Voyage AI embeddings (voyage-3)
+
+| Provider | Models | Dimensions | Configuration Required |
+|----------|--------|------------|------------------------|
+| openai | text-embedding-3-small, text-embedding-3-large | 1536, 3072 | api_key |
+| azure_openai | text-embedding-3-small, text-embedding-3-large | 1536, 3072 | api_key or use_azure_ad, api_url, deployment_name |
+| gemini | text-embedding-004 | 768 | api_key |
+| voyage | voyage-3, voyage-3-lite | 1024, 512 | api_key |
+
+**Example Configuration**:
+```yaml
+embedder:
+  provider: openai
+  model: text-embedding-3-small
+  dimensions: 1536
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}
+```
 
 **Example**:
 ```python
-from config.schema import EmbedderConfig, OpenAIProviderConfig
+from config.schema import EmbedderConfig
+from services.factories import EmbedderFactory
 
-# Configure OpenAI embedder
-embedder_config = EmbedderConfig(
+config = EmbedderConfig(
     provider="openai",
     model="text-embedding-3-small",
     dimensions=1536
 )
-embedder_config.providers.openai = OpenAIProviderConfig(
-    api_key="sk-..."
-)
-
-# Create client
-embedder = EmbedderFactory.create(embedder_config)
+embedder = EmbedderFactory.create(config)
 ```
 
 **Source**: `src/services/factories.py:253-361`
@@ -1285,969 +824,1209 @@ embedder = EmbedderFactory.create(embedder_config)
 
 ```python
 class DatabaseDriverFactory:
-    @staticmethod
-    def create_config(config: DatabaseConfig) -> dict:
-        ...
+    """Factory for creating Database drivers based on configuration."""
 ```
 
-**Description**: Factory for creating database driver configurations. Returns configuration dictionaries that can be passed to Graphiti(), not driver instances directly.
+**Description**: Creates database configuration dictionaries for graph database backends. Returns config dicts that can be passed to Graphiti() constructor.
 
-**Methods**:
+#### create_config()
 
-#### create_config
 ```python
 @staticmethod
-def create_config(config: DatabaseConfig) -> dict:
+def create_config(config: DatabaseConfig) -> dict
 ```
 
-**Description**: Create database configuration dictionary based on configured provider. Supports environment variable overrides for CI/CD compatibility.
+**Description**: Create database configuration dictionary based on the configured provider.
 
 **Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| config | DatabaseConfig | Yes | Database configuration object |
+- `config`: DatabaseConfig with provider and provider-specific settings
 
-**Returns**: `dict` - Configuration dictionary with provider-specific keys
+**Returns**: Dictionary with database connection configuration
 
 **Raises**:
-- `ValueError`: If provider not supported or configuration missing
+- `ValueError`: If provider not supported or required config missing
+- `ImportError`: If database driver not installed
 
 **Supported Providers**:
-- `neo4j`: Neo4j graph database
-- `falkordb`: FalkorDB (Redis-based graph database)
 
-**Return Structure**:
+| Provider | Graph Type | Configuration Required | Default Port |
+|----------|------------|------------------------|--------------|
+| neo4j | Property Graph | uri, username, password | 7687 (bolt) |
+| falkordb | Graph over Redis | uri, username (optional), password (optional) | 6379 (redis) |
 
-For Neo4j:
+**Neo4j Configuration**:
+```yaml
+database:
+  provider: neo4j
+  providers:
+    neo4j:
+      uri: bolt://localhost:7687
+      username: neo4j
+      password: ${NEO4J_PASSWORD}
+      database: neo4j
+```
+
+**Returns**:
 ```python
 {
     'uri': 'bolt://localhost:7687',
     'user': 'neo4j',
-    'password': 'password'
+    'password': 'secret'
 }
 ```
 
-For FalkorDB:
+**FalkorDB Configuration**:
+```yaml
+database:
+  provider: falkordb
+  providers:
+    falkordb:
+      uri: redis://localhost:6379
+      password: ${FALKORDB_PASSWORD}
+      database: default_db
+```
+
+**Returns**:
 ```python
 {
     'driver': 'falkordb',
     'host': 'localhost',
     'port': 6379,
     'username': None,
-    'password': None,
+    'password': 'secret',
     'database': 'default_db'
 }
 ```
 
+**Environment Variable Overrides**:
+The factory checks for environment variables that override YAML config:
+- `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
+- `FALKORDB_URI`, `FALKORDB_USER`, `FALKORDB_PASSWORD`
+
 **Example**:
 ```python
-from config.schema import DatabaseConfig, FalkorDBProviderConfig
+from config.schema import DatabaseConfig
+from services.factories import DatabaseDriverFactory
 
-# Configure FalkorDB
-db_config = DatabaseConfig(provider="falkordb")
-db_config.providers.falkordb = FalkorDBProviderConfig(
-    uri="redis://localhost:6379",
-    database="my_graph"
-)
+config = DatabaseConfig(provider="falkordb")
+db_config = DatabaseDriverFactory.create_config(config)
 
-# Create configuration dictionary
-config_dict = DatabaseDriverFactory.create_config(db_config)
-
-# Environment variable overrides are automatically applied:
-# FALKORDB_URI, FALKORDB_USER, FALKORDB_PASSWORD
-# NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+# Use with Graphiti
+from graphiti_core.driver.falkordb_driver import FalkorDriver
+driver = FalkorDriver(**db_config)
 ```
 
 **Source**: `src/services/factories.py:363-440`
 
 ---
 
-## Utility Functions
+## Configuration
 
-### format_node_result
+Configuration uses Pydantic Settings with multiple sources (YAML files, environment variables, defaults) with a defined priority.
 
-```python
-def format_node_result(node: EntityNode) -> dict[str, Any]:
-```
-
-**Description**: Format an entity node into a serializable dictionary. Excludes embedding vectors to reduce payload size and avoid exposing internal representations.
-
-**Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| node | EntityNode | Yes | The EntityNode to format |
-
-**Returns**: `dict[str, Any]` - Dictionary representation with serialized dates and excluded embeddings
-
-**Example**:
-```python
-from graphiti_core.nodes import EntityNode
-
-# Get a node from Graphiti
-node = await client.get_node(uuid="abc123...")
-
-# Format for API response
-formatted = format_node_result(node)
-# {
-#     'uuid': 'abc123...',
-#     'name': 'Acme Corp',
-#     'labels': ['Organization'],
-#     'created_at': '2024-01-15T10:30:00',
-#     'summary': 'Technology company...',
-#     'attributes': {...}
-#     # 'name_embedding' excluded
-# }
-```
-
-**Source**: `src/utils/formatting.py:9-30`
-
----
-
-### format_fact_result
+### GraphitiConfig
 
 ```python
-def format_fact_result(edge: EntityEdge) -> dict[str, Any]:
+class GraphitiConfig(BaseSettings):
+    """Graphiti configuration with YAML and environment support."""
 ```
 
-**Description**: Format an entity edge (fact/relationship) into a serializable dictionary. Excludes embedding vectors to reduce payload size.
+**Description**: Main configuration class that aggregates all provider configurations. Supports loading from YAML files with environment variable expansion and direct environment variable overrides.
 
-**Parameters**:
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| edge | EntityEdge | Yes | The EntityEdge to format |
+**Configuration Priority** (highest to lowest):
+1. CLI arguments (via `apply_cli_overrides()`)
+2. Environment variables
+3. YAML file (`config/config.yaml` or path from `CONFIG_PATH` env var)
+4. Default values
 
-**Returns**: `dict[str, Any]` - Dictionary representation with serialized dates and excluded embeddings
-
-**Example**:
+**Attributes**:
 ```python
-from graphiti_core.edges import EntityEdge
-
-# Get an edge from Graphiti
-edge = await EntityEdge.get_by_uuid(driver, uuid="def456...")
-
-# Format for API response
-formatted = format_fact_result(edge)
-# {
-#     'uuid': 'def456...',
-#     'name': 'WORKS_AT',
-#     'fact': 'John Smith works at Acme Corp',
-#     'valid_at': '2020-01-15T10:30:00',
-#     'invalid_at': null,
-#     'source_node_uuid': 'abc123...',
-#     'target_node_uuid': 'xyz789...',
-#     'attributes': {...}
-#     # 'fact_embedding' excluded
-# }
+server: ServerConfig           # Server settings (host, port, transport)
+llm: LLMConfig                # LLM provider configuration
+embedder: EmbedderConfig      # Embedder provider configuration
+database: DatabaseConfig      # Database provider configuration
+graphiti: GraphitiAppConfig   # Graphiti-specific settings
+destroy_graph: bool           # Clear graph on startup (default: False)
 ```
 
-**Source**: `src/utils/formatting.py:32-51`
+**Environment Variables**:
 
----
+#### Server Configuration
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| SERVER__TRANSPORT | str | "http" | Transport type: http, stdio |
+| SERVER__HOST | str | "0.0.0.0" | Server host address |
+| SERVER__PORT | int | 8000 | Server port |
 
-### create_azure_credential_token_provider
+#### LLM Configuration
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| LLM__PROVIDER | str | "openai" | LLM provider name |
+| LLM__MODEL | str | "gpt-4.1" | Model name |
+| LLM__TEMPERATURE | float | None | Temperature (0.0-2.0, None for reasoning models) |
+| LLM__MAX_TOKENS | int | 4096 | Max output tokens |
+| LLM__PROVIDERS__OPENAI__API_KEY | str | - | OpenAI API key |
+| LLM__PROVIDERS__AZURE_OPENAI__API_KEY | str | - | Azure OpenAI API key |
+| LLM__PROVIDERS__AZURE_OPENAI__API_URL | str | - | Azure endpoint URL |
+| LLM__PROVIDERS__AZURE_OPENAI__DEPLOYMENT_NAME | str | - | Azure deployment name |
+| LLM__PROVIDERS__AZURE_OPENAI__USE_AZURE_AD | bool | false | Use Azure AD auth |
+| LLM__PROVIDERS__ANTHROPIC__API_KEY | str | - | Anthropic API key |
+| LLM__PROVIDERS__GEMINI__API_KEY | str | - | Gemini API key |
+| LLM__PROVIDERS__GROQ__API_KEY | str | - | Groq API key |
 
-```python
-def create_azure_credential_token_provider() -> Callable[[], str]:
-```
+#### Embedder Configuration
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| EMBEDDER__PROVIDER | str | "openai" | Embedder provider name |
+| EMBEDDER__MODEL | str | "text-embedding-3-small" | Model name |
+| EMBEDDER__DIMENSIONS | int | 1536 | Embedding dimensions |
+| EMBEDDER__PROVIDERS__OPENAI__API_KEY | str | - | OpenAI API key |
+| EMBEDDER__PROVIDERS__AZURE_OPENAI__API_KEY | str | - | Azure OpenAI API key |
+| EMBEDDER__PROVIDERS__GEMINI__API_KEY | str | - | Gemini API key |
+| EMBEDDER__PROVIDERS__VOYAGE__API_KEY | str | - | Voyage API key |
 
-**Description**: Create Azure credential token provider for managed identity authentication. Uses DefaultAzureCredential to support multiple authentication methods (managed identity, Azure CLI, environment variables, etc.).
+#### Database Configuration
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| DATABASE__PROVIDER | str | "falkordb" | Database provider name |
+| DATABASE__PROVIDERS__NEO4J__URI | str | "bolt://localhost:7687" | Neo4j connection URI |
+| DATABASE__PROVIDERS__NEO4J__USERNAME | str | "neo4j" | Neo4j username |
+| DATABASE__PROVIDERS__NEO4J__PASSWORD | str | - | Neo4j password |
+| DATABASE__PROVIDERS__FALKORDB__URI | str | "redis://localhost:6379" | FalkorDB connection URI |
+| DATABASE__PROVIDERS__FALKORDB__PASSWORD | str | - | FalkorDB password |
 
-**Returns**: `Callable[[], str]` - Token provider function for Azure OpenAI client
+#### Graphiti Configuration
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| GRAPHITI__GROUP_ID | str | "main" | Default group ID for namespacing |
+| GRAPHITI__USER_ID | str | "mcp_user" | Default user ID |
+| GRAPHITI__EPISODE_ID_PREFIX | str | "" | Prefix for episode IDs |
 
-**Raises**:
-- `ImportError`: If azure-identity package not installed
+**YAML Configuration**:
 
-**Requirements**: Install with `pip install mcp-server[azure]` or `pip install azure-identity`
-
-**Example**:
-```python
-# Configure Azure OpenAI with managed identity
-if use_azure_ad:
-    token_provider = create_azure_credential_token_provider()
-
-    azure_client = AsyncAzureOpenAI(
-        azure_endpoint="https://your-resource.openai.azure.com",
-        api_version="2024-10-21",
-        azure_ad_token_provider=token_provider  # No API key needed
-    )
-else:
-    # Use API key authentication
-    azure_client = AsyncAzureOpenAI(
-        api_key="...",
-        azure_endpoint="https://your-resource.openai.azure.com"
-    )
-```
-
-**Source**: `src/utils/utils.py:6-28`
-
----
-
-## Configuration Options
-
-### Environment Variables
-
-The server supports configuration via environment variables, YAML files, and CLI arguments. Environment variables can be referenced in YAML using `${VAR_NAME}` or `${VAR_NAME:default}` syntax.
-
-#### Core Settings
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| CONFIG_PATH | Path to YAML configuration file | config/config.yaml |
-| SEMAPHORE_LIMIT | Max concurrent episode processing operations | 10 |
-
-#### Server Settings
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| SERVER__TRANSPORT | Transport type: http, stdio, or sse | http |
-| SERVER__HOST | Server host address | 0.0.0.0 |
-| SERVER__PORT | Server port number | 8000 |
-
-#### LLM Provider Settings
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| LLM__PROVIDER | LLM provider name | openai |
-| LLM__MODEL | Model name | gpt-4.1 |
-| LLM__TEMPERATURE | Sampling temperature | null |
-| LLM__MAX_TOKENS | Maximum tokens | 4096 |
-| OPENAI_API_KEY | OpenAI API key | - |
-| OPENAI_API_URL | OpenAI API base URL | https://api.openai.com/v1 |
-| OPENAI_ORGANIZATION_ID | OpenAI organization ID | - |
-| AZURE_OPENAI_API_KEY | Azure OpenAI API key | - |
-| AZURE_OPENAI_ENDPOINT | Azure OpenAI endpoint URL | - |
-| AZURE_OPENAI_API_VERSION | Azure OpenAI API version | 2024-10-21 |
-| AZURE_OPENAI_DEPLOYMENT | Azure OpenAI deployment name | - |
-| USE_AZURE_AD | Use Azure AD authentication | false |
-| ANTHROPIC_API_KEY | Anthropic API key | - |
-| ANTHROPIC_API_URL | Anthropic API base URL | https://api.anthropic.com |
-| GOOGLE_API_KEY | Google/Gemini API key | - |
-| GOOGLE_PROJECT_ID | Google Cloud project ID | - |
-| GOOGLE_LOCATION | Google Cloud location | us-central1 |
-| GROQ_API_KEY | Groq API key | - |
-| GROQ_API_URL | Groq API base URL | https://api.groq.com/openai/v1 |
-
-#### Embedder Provider Settings
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| EMBEDDER__PROVIDER | Embedder provider name | openai |
-| EMBEDDER__MODEL | Embedding model name | text-embedding-3-small |
-| EMBEDDER__DIMENSIONS | Embedding dimensions | 1536 |
-| VOYAGE_API_KEY | Voyage AI API key | - |
-| VOYAGE_API_URL | Voyage AI API base URL | https://api.voyageai.com/v1 |
-
-#### Database Settings
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| DATABASE__PROVIDER | Database provider | falkordb |
-| FALKORDB_URI | FalkorDB connection URI | redis://localhost:6379 |
-| FALKORDB_USER | FalkorDB username | - |
-| FALKORDB_PASSWORD | FalkorDB password | - |
-| FALKORDB_DATABASE | FalkorDB database name | default_db |
-| NEO4J_URI | Neo4j connection URI | bolt://localhost:7687 |
-| NEO4J_USER | Neo4j username | neo4j |
-| NEO4J_PASSWORD | Neo4j password | - |
-| NEO4J_DATABASE | Neo4j database name | neo4j |
-| USE_PARALLEL_RUNTIME | Use Neo4j parallel runtime | false |
-
-#### Graphiti Settings
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| GRAPHITI__GROUP_ID | Default namespace for graph data | main |
-| GRAPHITI__EPISODE_ID_PREFIX | Prefix for episode IDs | - |
-| GRAPHITI__USER_ID | User ID for operations | mcp_user |
-
-### YAML Configuration
-
-The recommended way to configure the server is through a YAML file (default: `config/config.yaml`).
-
+Example `config/config.yaml`:
 ```yaml
-# config/config.yaml
 server:
-  transport: "http"
-  host: "0.0.0.0"
+  transport: http
+  host: 0.0.0.0
   port: 8000
 
 llm:
-  provider: "openai"
-  model: "gpt-5-mini"
+  provider: openai
+  model: gpt-4.1
+  temperature: 0.7
   max_tokens: 4096
-
   providers:
     openai:
       api_key: ${OPENAI_API_KEY}
-      api_url: ${OPENAI_API_URL:https://api.openai.com/v1}
+    azure_openai:
+      api_key: ${AZURE_OPENAI_API_KEY}
+      api_url: https://your-resource.openai.azure.com
+      api_version: "2024-10-21"
+      deployment_name: gpt-4
+      use_azure_ad: false
 
 embedder:
-  provider: "openai"
-  model: "text-embedding-3-small"
+  provider: openai
+  model: text-embedding-3-small
   dimensions: 1536
-
   providers:
     openai:
       api_key: ${OPENAI_API_KEY}
 
 database:
-  provider: "falkordb"
-
+  provider: falkordb
   providers:
     falkordb:
-      uri: ${FALKORDB_URI:redis://localhost:6379}
-      database: ${FALKORDB_DATABASE:default_db}
+      uri: redis://localhost:6379
+      password: ${FALKORDB_PASSWORD}
+      database: default_db
+    neo4j:
+      uri: bolt://localhost:7687
+      username: neo4j
+      password: ${NEO4J_PASSWORD}
 
 graphiti:
-  group_id: ${GRAPHITI_GROUP_ID:main}
-  user_id: ${USER_ID:mcp_user}
+  group_id: main
+  user_id: mcp_user
   entity_types:
-    - name: "Preference"
-      description: "User preferences and choices"
-    - name: "Organization"
-      description: "Companies and institutions"
+    - name: Organization
+      description: Companies, institutions, and formal groups
+    - name: Location
+      description: Physical or virtual places
 ```
 
-### CLI Arguments
-
-Command-line arguments override both environment variables and YAML configuration.
-
-| Argument | Description | Example |
-|----------|-------------|---------|
-| --config | Path to YAML config file | --config /path/to/config.yaml |
-| --transport | Transport type | --transport http |
-| --host | Server host | --host 0.0.0.0 |
-| --port | Server port | --port 8000 |
-| --llm-provider | LLM provider | --llm-provider openai |
-| --model | LLM model name | --model gpt-5-mini |
-| --temperature | LLM temperature | --temperature 0.7 |
-| --embedder-provider | Embedder provider | --embedder-provider openai |
-| --embedder-model | Embedder model | --embedder-model text-embedding-3-small |
-| --database-provider | Database provider | --database-provider falkordb |
-| --group-id | Graph namespace | --group-id my_group |
-| --user-id | User ID | --user-id user123 |
-| --destroy-graph | Clear graph on startup | --destroy-graph |
-
-**Example**:
-```bash
-python src/graphiti_mcp_server.py \
-  --config config/production.yaml \
-  --llm-provider openai \
-  --model gpt-5-mini \
-  --transport http \
-  --port 8080 \
-  --group-id production_data
+**Environment Variable Expansion**:
+YAML supports `${VAR}` and `${VAR:default}` syntax:
+```yaml
+llm:
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}              # Required, no default
+      api_url: ${OPENAI_API_URL:https://api.openai.com/v1}  # Optional with default
 ```
 
----
-
-## Usage Patterns
-
-### Basic Setup
-
+**Usage**:
 ```python
-import asyncio
-from config.schema import GraphitiConfig
-from services.factories import LLMClientFactory, EmbedderFactory
-
-async def setup_graphiti():
-    # Load configuration (from YAML + env vars)
-    config = GraphitiConfig()
-
-    # Create service
-    from graphiti_mcp_server import GraphitiService
-    service = GraphitiService(config, semaphore_limit=10)
-
-    # Initialize
-    await service.initialize()
-
-    # Get client
-    client = await service.get_client()
-    return client
-
-# Run setup
-client = asyncio.run(setup_graphiti())
-```
-
-### Custom Configuration
-
-```python
-from config.schema import (
-    GraphitiConfig,
-    LLMConfig,
-    EmbedderConfig,
-    DatabaseConfig,
-    OpenAIProviderConfig,
-    FalkorDBProviderConfig
-)
-
-# Build configuration programmatically
+# Load from default location (config/config.yaml)
 config = GraphitiConfig()
 
-# Configure LLM
-config.llm = LLMConfig(
-    provider="openai",
-    model="gpt-5-mini",
-    temperature=None,  # Auto for reasoning models
-    max_tokens=4096
-)
-config.llm.providers.openai = OpenAIProviderConfig(
-    api_key="sk-...",
-    api_url="https://api.openai.com/v1"
-)
+# Load from custom path
+os.environ['CONFIG_PATH'] = '/path/to/config.yaml'
+config = GraphitiConfig()
 
-# Configure Embedder
-config.embedder = EmbedderConfig(
-    provider="openai",
-    model="text-embedding-3-small",
-    dimensions=1536
-)
-config.embedder.providers.openai = OpenAIProviderConfig(
-    api_key="sk-..."
-)
-
-# Configure Database
-config.database = DatabaseConfig(provider="falkordb")
-config.database.providers.falkordb = FalkorDBProviderConfig(
-    uri="redis://localhost:6379",
-    database="my_graph"
-)
-
-# Configure Graphiti app settings
-config.graphiti.group_id = "my_namespace"
-config.graphiti.user_id = "user123"
-
-# Use the configuration
-service = GraphitiService(config)
-await service.initialize()
+# Access configuration
+print(config.llm.provider)  # "openai"
+print(config.database.provider)  # "falkordb"
 ```
 
-### Error Handling
-
-```python
-from models.response_types import ErrorResponse, SuccessResponse
-
-async def safe_add_memory(name: str, content: str):
-    """Add memory with comprehensive error handling."""
-    try:
-        result = await add_memory(
-            name=name,
-            episode_body=content,
-            source="text"
-        )
-
-        # Check if error response
-        if isinstance(result, dict) and 'error' in result:
-            print(f"Error: {result['error']}")
-            return None
-
-        # Success
-        print(f"Success: {result['message']}")
-        return result
-
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        return None
-
-# Usage
-await safe_add_memory("Meeting", "Discussed Q4 strategy")
-```
-
-### Working with Search Results
-
-```python
-async def search_and_analyze():
-    # Search for nodes
-    nodes_result = await search_nodes(
-        query="technology companies",
-        entity_types=["Organization"],
-        max_nodes=10
-    )
-
-    if 'error' not in nodes_result:
-        for node in nodes_result['nodes']:
-            print(f"Found: {node['name']}")
-            print(f"  UUID: {node['uuid']}")
-            print(f"  Summary: {node['summary']}")
-            print(f"  Created: {node['created_at']}")
-
-            # Get facts about this node
-            facts_result = await search_memory_facts(
-                query="relationships",
-                center_node_uuid=node['uuid'],
-                max_facts=5
-            )
-
-            if 'error' not in facts_result:
-                print(f"  Related facts:")
-                for fact in facts_result['facts']:
-                    print(f"    - {fact['fact']}")
-
-await search_and_analyze()
-```
-
-### Queue Monitoring
-
-```python
-from services.queue_service import QueueService
-
-# Access queue service
-queue_service = QueueService()
-await queue_service.initialize(graphiti_client)
-
-# Add episodes
-await queue_service.add_episode(
-    group_id="main",
-    name="Episode 1",
-    content="Content...",
-    source_description="test",
-    episode_type=EpisodeType.text,
-    entity_types=None,
-    uuid=None
-)
-
-# Monitor queue
-group_id = "main"
-queue_size = queue_service.get_queue_size(group_id)
-is_processing = queue_service.is_worker_running(group_id)
-
-print(f"Queue size: {queue_size}")
-print(f"Worker active: {is_processing}")
-```
-
-### Managing Multiple Namespaces
-
-```python
-# Add data to different namespaces
-await add_memory(
-    name="Customer A Info",
-    episode_body="Customer A prefers email communication",
-    group_id="customer_a"
-)
-
-await add_memory(
-    name="Customer B Info",
-    episode_body="Customer B prefers phone calls",
-    group_id="customer_b"
-)
-
-# Search within specific namespace
-result = await search_nodes(
-    query="communication preferences",
-    group_ids=["customer_a"]
-)
-
-# Search across multiple namespaces
-result = await search_nodes(
-    query="communication preferences",
-    group_ids=["customer_a", "customer_b"]
-)
-
-# Clear specific namespace
-await clear_graph(group_ids=["test_data"])
-```
+**Source**: `src/config/schema.py:230-293`
 
 ---
 
-## Best Practices
+### Nested Configuration Classes
 
-### 1. Configuration Management
-
-**DO**: Use YAML configuration files with environment variable expansion
-```yaml
-llm:
-  providers:
-    openai:
-      api_key: ${OPENAI_API_KEY}  # Reference env var
-```
-
-**DON'T**: Hard-code API keys in configuration files
-```yaml
-llm:
-  providers:
-    openai:
-      api_key: "sk-1234..."  # Never do this!
-```
-
-### 2. Concurrency Control
-
-**DO**: Tune SEMAPHORE_LIMIT based on your LLM provider's rate limits
-
-```bash
-# For OpenAI Tier 1 (free): 3 RPM
-export SEMAPHORE_LIMIT=1
-
-# For OpenAI Tier 3: 500 RPM
-export SEMAPHORE_LIMIT=10
-
-# For Anthropic high tier: 1,000 RPM
-export SEMAPHORE_LIMIT=20
-```
-
-**Symptoms of incorrect settings**:
-- Too high: 429 rate limit errors, increased costs
-- Too low: Slow throughput, underutilized API quota
-
-**Source**: `src/graphiti_mcp_server.py:49-76`
-
-### 3. Namespace (group_id) Organization
-
-**DO**: Use logical namespaces to separate different data domains
-
+#### ServerConfig
 ```python
-# Separate by customer
-await add_memory(name="...", episode_body="...", group_id="customer_123")
-
-# Separate by project
-await add_memory(name="...", episode_body="...", group_id="project_alpha")
-
-# Separate by environment
-await add_memory(name="...", episode_body="...", group_id="production")
+class ServerConfig(BaseModel):
+    transport: str = 'http'  # http, stdio, or sse (deprecated)
+    host: str = '0.0.0.0'
+    port: int = 8000
 ```
+**Source**: `src/config/schema.py:76-85`
 
-**DON'T**: Mix unrelated data in the same namespace
+---
 
+#### LLMConfig
 ```python
-# Bad: mixing customer and internal data
-await add_memory(name="Customer data", episode_body="...", group_id="main")
-await add_memory(name="Internal meeting", episode_body="...", group_id="main")
+class LLMConfig(BaseModel):
+    provider: str = 'openai'
+    model: str = 'gpt-4.1'
+    temperature: float | None = None
+    max_tokens: int = 4096
+    providers: LLMProvidersConfig
 ```
+**Source**: `src/config/schema.py:146-156`
 
-### 4. Episode Content Structure
+---
 
-**DO**: Provide descriptive names and rich content
-
+#### EmbedderConfig
 ```python
-await add_memory(
-    name="Q4 2024 Sales Meeting Notes",
-    episode_body="Team discussed Q4 targets. Key points: increase focus on enterprise clients, new product launch in November, hiring 3 sales reps.",
-    source="text",
-    source_description="Sales team meeting on 2024-10-15"
-)
+class EmbedderConfig(BaseModel):
+    provider: str = 'openai'
+    model: str = 'text-embedding-3-small'
+    dimensions: int = 1536
+    providers: EmbedderProvidersConfig
 ```
+**Source**: `src/config/schema.py:167-174`
 
-**DON'T**: Use vague names or minimal content
+---
 
+#### DatabaseConfig
 ```python
-await add_memory(
-    name="Meeting",
-    episode_body="Stuff discussed",
-    source="text"
-)
+class DatabaseConfig(BaseModel):
+    provider: str = 'falkordb'
+    providers: DatabaseProvidersConfig
 ```
+**Source**: `src/config/schema.py:202-207`
 
-### 5. JSON Episode Formatting
+---
 
-**DO**: Provide properly escaped JSON strings
-
+#### GraphitiAppConfig
 ```python
-import json
-
-data = {
-    "customer": {"name": "Acme Corp"},
-    "products": [{"id": "P001", "name": "Widget"}]
-}
-
-await add_memory(
-    name="Customer Data",
-    episode_body=json.dumps(data),  # Proper JSON string
-    source="json",
-    source_description="CRM export"
-)
+class GraphitiAppConfig(BaseModel):
+    group_id: str = 'main'
+    episode_id_prefix: str = ''
+    user_id: str = 'mcp_user'
+    entity_types: list[EntityTypeConfig] = []
 ```
+**Source**: `src/config/schema.py:216-228`
 
-**DON'T**: Pass raw dictionaries or unescaped JSON
+---
 
+#### EntityTypeConfig
 ```python
-# Wrong: passing dict instead of JSON string
-await add_memory(
-    name="Customer Data",
-    episode_body={"customer": "Acme"},  # Will fail
-    source="json"
-)
+class EntityTypeConfig(BaseModel):
+    name: str          # Entity type name (e.g., "Organization")
+    description: str   # Description for LLM entity extraction
 ```
 
-### 6. Search Query Specificity
-
-**DO**: Use specific, descriptive queries
-
-```python
-# Good: specific query
-await search_nodes(
-    query="software companies founded after 2020 in San Francisco",
-    entity_types=["Organization"]
-)
-
-# Good: targeted fact search
-await search_memory_facts(
-    query="who are the founders and when did they start the company",
-    max_facts=5
-)
-```
-
-**DON'T**: Use overly generic queries
-
-```python
-# Bad: too generic
-await search_nodes(query="companies")
-
-# Bad: unclear intent
-await search_memory_facts(query="stuff")
-```
-
-### 7. Error Handling
-
-**DO**: Always check for error responses
-
-```python
-result = await add_memory(name="Test", episode_body="Content")
-
-if 'error' in result:
-    logger.error(f"Failed to add memory: {result['error']}")
-    # Handle error appropriately
-else:
-    logger.info(f"Success: {result['message']}")
-```
-
-**DON'T**: Assume operations always succeed
-
-```python
-# Bad: no error checking
-result = await add_memory(name="Test", episode_body="Content")
-print(result['message'])  # May crash if error occurred
-```
-
-### 8. Resource Cleanup
-
-**DO**: Clear test data after development/testing
-
-```python
-# Clear test namespace after testing
-await clear_graph(group_ids=["test", "development"])
-```
-
-**DON'T**: Let test data accumulate in production namespaces
-
-### 9. Entity Type Configuration
-
-**DO**: Define custom entity types relevant to your domain
-
+**Example**:
 ```yaml
 graphiti:
   entity_types:
-    - name: "Customer"
-      description: "Business customers and clients"
-    - name: "Product"
-      description: "Products and services offered"
-    - name: "Transaction"
-      description: "Purchase and sales transactions"
+    - name: Organization
+      description: Companies, institutions, and formal groups
+    - name: Preference
+      description: User preferences, choices, and opinions
 ```
 
-**DON'T**: Use generic entity types for specialized domains
+**Source**: `src/config/schema.py:209-214`
 
-### 10. Database Connection Management
+---
 
-**DO**: Verify database connectivity before operations
+## Data Models
+
+Data models use TypedDict for JSON-serializable response structures. All timestamps are ISO 8601 formatted strings.
+
+### Response Types
+
+#### ErrorResponse
+```python
+class ErrorResponse(TypedDict):
+    error: str
+```
+**Usage**: Returned by all tools when errors occur
+**Example**: `{"error": "Database connection failed"}`
+**Source**: `src/models/response_types.py:8-9`
+
+---
+
+#### SuccessResponse
+```python
+class SuccessResponse(TypedDict):
+    message: str
+```
+**Usage**: Returned by write operations (add_memory, delete_*, clear_graph)
+**Example**: `{"message": "Episode 'Meeting Notes' queued for processing"}`
+**Source**: `src/models/response_types.py:12-13`
+
+---
+
+#### NodeResult
+```python
+class NodeResult(TypedDict):
+    uuid: str
+    name: str
+    labels: list[str]
+    created_at: str | None
+    summary: str | None
+    group_id: str
+    attributes: dict[str, Any]
+```
+**Usage**: Individual entity node in search results
+**Example**:
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Acme Corporation",
+  "labels": ["Organization"],
+  "created_at": "2024-11-30T10:30:00Z",
+  "summary": "A technology company specializing in AI products",
+  "group_id": "project-alpha",
+  "attributes": {
+    "industry": "Technology",
+    "founded": "2020"
+  }
+}
+```
+**Source**: `src/models/response_types.py:16-24`
+
+---
+
+#### NodeSearchResponse
+```python
+class NodeSearchResponse(TypedDict):
+    message: str
+    nodes: list[NodeResult]
+```
+**Usage**: Returned by search_nodes tool
+**Example**:
+```json
+{
+  "message": "Nodes retrieved successfully",
+  "nodes": [
+    { "uuid": "...", "name": "Acme Corp", ... },
+    { "uuid": "...", "name": "Alice Smith", ... }
+  ]
+}
+```
+**Source**: `src/models/response_types.py:26-28`
+
+---
+
+#### FactSearchResponse
+```python
+class FactSearchResponse(TypedDict):
+    message: str
+    facts: list[dict[str, Any]]
+```
+**Usage**: Returned by search_memory_facts tool
+**Fact Structure**:
+```json
+{
+  "uuid": "fact-uuid-123",
+  "source_node_uuid": "alice-uuid",
+  "target_node_uuid": "acme-uuid",
+  "name": "WORKS_AT",
+  "fact": "Alice works at Acme Corporation",
+  "valid_at": "2024-01-15T00:00:00Z",
+  "invalid_at": null,
+  "created_at": "2024-11-30T10:30:00Z",
+  "group_id": "project-alpha",
+  "attributes": {}
+}
+```
+**Source**: `src/models/response_types.py:31-33`
+
+---
+
+#### EpisodeSearchResponse
+```python
+class EpisodeSearchResponse(TypedDict):
+    message: str
+    episodes: list[dict[str, Any]]
+```
+**Usage**: Returned by get_episodes tool
+**Episode Structure**:
+```json
+{
+  "uuid": "episode-uuid-123",
+  "name": "Meeting Notes",
+  "content": "Discussed Q4 roadmap...",
+  "created_at": "2024-11-30T10:00:00Z",
+  "source": "text",
+  "source_description": "Team meeting",
+  "group_id": "project-alpha"
+}
+```
+**Source**: `src/models/response_types.py:36-38`
+
+---
+
+#### StatusResponse
+```python
+class StatusResponse(TypedDict):
+    status: str        # "ok" or "error"
+    message: str
+```
+**Usage**: Returned by get_status tool
+**Example**:
+```json
+{
+  "status": "ok",
+  "message": "Graphiti MCP server is running and connected to falkordb database"
+}
+```
+**Source**: `src/models/response_types.py:41-43`
+
+---
+
+### Entity Types
+
+Custom Pydantic models for domain-specific entity extraction. These guide the LLM when extracting entities from episodes.
+
+#### Requirement
+```python
+class Requirement(BaseModel):
+    """A specific need, feature, or functionality that must be fulfilled."""
+
+    project_name: str  # Project to which requirement belongs
+    description: str   # Requirement description
+```
+**Usage**: Extract project requirements and specifications from episodes
+**Source**: `src/models/entity_types.py:6-32`
+
+---
+
+#### Preference
+```python
+class Preference(BaseModel):
+    """User preferences, choices, opinions, or selections."""
+```
+**Priority**: Highest - prioritize over other classifications
+**Trigger Patterns**: "I want/like/prefer", "I don't want/dislike", "X is better/worse"
+**Source**: `src/models/entity_types.py:34-43`
+
+---
+
+#### Procedure
+```python
+class Procedure(BaseModel):
+    """Instructions for actions or how to perform in certain scenarios."""
+
+    description: str  # Procedure description
+```
+**Usage**: Extract step-by-step instructions, workflows, and processes
+**Source**: `src/models/entity_types.py:46-65`
+
+---
+
+#### Location
+```python
+class Location(BaseModel):
+    """Physical or virtual place where activities occur."""
+
+    name: str
+    description: str
+```
+**Examples**: Cities, buildings, websites, virtual meeting rooms
+**Source**: `src/models/entity_types.py:67-91`
+
+---
+
+#### Event
+```python
+class Event(BaseModel):
+    """Time-bound activity, occurrence, or experience."""
+
+    name: str
+    description: str
+```
+**Examples**: Meetings, appointments, deadlines, celebrations
+**Source**: `src/models/entity_types.py:93-115`
+
+---
+
+#### Object
+```python
+class Object(BaseModel):
+    """Physical item, tool, device, or possession."""
+
+    name: str
+    description: str
+```
+**Priority**: Last resort - check other types first
+**Examples**: Car, phone, equipment, tools
+**Source**: `src/models/entity_types.py:117-141`
+
+---
+
+#### Topic
+```python
+class Topic(BaseModel):
+    """Subject of conversation, interest, or knowledge domain."""
+
+    name: str
+    description: str
+```
+**Priority**: Last resort - check other types first
+**Examples**: Technology, health, sports, machine learning
+**Source**: `src/models/entity_types.py:143-167`
+
+---
+
+#### Organization
+```python
+class Organization(BaseModel):
+    """Company, institution, group, or formal entity."""
+
+    name: str
+    description: str
+```
+**Examples**: Companies, schools, hospitals, government agencies, clubs
+**Source**: `src/models/entity_types.py:169-190`
+
+---
+
+#### Document
+```python
+class Document(BaseModel):
+    """Information content in various forms."""
+
+    title: str
+    description: str
+```
+**Examples**: Books, articles, reports, emails, videos, presentations
+**Source**: `src/models/entity_types.py:192-213`
+
+---
+
+**Entity Type Configuration**:
+```yaml
+graphiti:
+  entity_types:
+    - name: Organization
+      description: Companies, institutions, and formal groups
+    - name: Location
+      description: Physical or virtual places
+```
+
+**ENTITY_TYPES Dictionary**:
+```python
+ENTITY_TYPES: dict[str, BaseModel] = {
+    'Requirement': Requirement,
+    'Preference': Preference,
+    'Procedure': Procedure,
+    'Location': Location,
+    'Event': Event,
+    'Object': Object,
+    'Topic': Topic,
+    'Organization': Organization,
+    'Document': Document,
+}
+```
+**Source**: `src/models/entity_types.py:215-225`
+
+---
+
+## Utility Functions
+
+### format_node_result()
 
 ```python
-status = await get_status()
-
-if status['status'] == 'ok':
-    print("Database connected, ready to proceed")
-    # Perform operations
-else:
-    print(f"Database error: {status['message']}")
-    # Handle connection issue
+def format_node_result(node: EntityNode) -> dict[str, Any]
 ```
 
-**DON'T**: Assume database is always available
+**Description**: Format an EntityNode Pydantic model into a JSON-serializable dictionary. Excludes embedding vectors to reduce payload size.
 
-### 11. Transport Selection
+**Parameters**:
+- `node`: EntityNode instance from Graphiti Core
 
-**DO**: Use HTTP transport for production deployments
+**Returns**: Dictionary with serialized dates and excluded embeddings
 
-```yaml
-server:
-  transport: "http"  # Recommended for production
-  host: "0.0.0.0"
-  port: 8000
+**Exclusions**:
+- `name_embedding` field
+- Any `*_embedding` fields in attributes
+
+**Example**:
+```python
+from graphiti_core.nodes import EntityNode
+from utils.formatting import format_node_result
+
+node = EntityNode(
+    uuid="node-123",
+    name="Acme Corp",
+    labels=["Organization"],
+    summary="Tech company",
+    group_id="main"
+)
+formatted = format_node_result(node)
+# Result: {"uuid": "node-123", "name": "Acme Corp", ...}
 ```
 
-**DON'T**: Use stdio transport in production (it's for local development/testing)
+**Source**: `src/utils/formatting.py:9-29`
 
-```yaml
-server:
-  transport: "stdio"  # Only for local testing
-```
+---
 
-### 12. Logging and Monitoring
-
-**DO**: Monitor logs for processing status and errors
+### format_fact_result()
 
 ```python
-# The server logs include:
-# - Episode queuing and processing
-# - LLM provider rate limit warnings
-# - Database connection status
-# - Configuration details at startup
-
-# Watch for:
-# - "429 rate limit errors" -> reduce SEMAPHORE_LIMIT
-# - "Failed to process episode" -> check content format
-# - "Database connection failed" -> verify database is running
+def format_fact_result(edge: EntityEdge) -> dict[str, Any]
 ```
 
-### 13. Custom Entity Types
+**Description**: Format an EntityEdge Pydantic model into a JSON-serializable dictionary. Excludes embedding vectors.
 
-**DO**: Use entity type priorities appropriately
+**Parameters**:
+- `edge`: EntityEdge instance from Graphiti Core
+
+**Returns**: Dictionary with serialized dates and excluded embeddings
+
+**Exclusions**:
+- `fact_embedding` field
+- Any `*_embedding` fields in attributes
+
+**Example**:
+```python
+from graphiti_core.edges import EntityEdge
+from utils.formatting import format_fact_result
+
+edge = EntityEdge(
+    uuid="edge-123",
+    source_node_uuid="alice-uuid",
+    target_node_uuid="acme-uuid",
+    name="WORKS_AT",
+    fact="Alice works at Acme Corp",
+    group_id="main"
+)
+formatted = format_fact_result(edge)
+# Result: {"uuid": "edge-123", "source_node_uuid": "alice-uuid", ...}
+```
+
+**Source**: `src/utils/formatting.py:32-50`
+
+---
+
+### create_azure_credential_token_provider()
 
 ```python
-# High priority types should be checked first
-entity_types = [
-    {"name": "Preference", "description": "PRIORITIZE over most other types"},
-    {"name": "Organization", "description": "Companies and groups"},
-    {"name": "Topic", "description": "Use as last resort"}
-]
+def create_azure_credential_token_provider() -> Callable[[], str]
 ```
 
-**Reference**: The built-in entity types have priority guidance in their descriptions. See `src/models/entity_types.py:1-226`
+**Description**: Create Azure credential token provider for managed identity authentication with Azure OpenAI.
 
-### 14. Azure AD Authentication
+**Returns**: Token provider callable for Azure SDK clients
 
-**DO**: Use managed identity for Azure deployments
+**Raises**:
+- `ImportError`: If azure-identity package not installed
 
-```yaml
-llm:
-  providers:
-    azure_openai:
-      api_url: ${AZURE_OPENAI_ENDPOINT}
-      api_version: "2024-10-21"
-      deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
-      use_azure_ad: true  # No API key needed
-```
-
-**Requirement**: Install azure-identity package
-
+**Requirements**:
 ```bash
 pip install azure-identity
 # or
 pip install mcp-server[azure]
 ```
 
----
-
-## Appendix
-
-### Type Definitions
-
-#### EpisodeType
+**Usage**:
 ```python
-from graphiti_core.nodes import EpisodeType
+from utils.utils import create_azure_credential_token_provider
 
-# Available types:
-EpisodeType.text      # Plain text content
-EpisodeType.json      # Structured JSON data
-EpisodeType.message   # Conversation messages
+# In Azure environment (VM, App Service, etc.)
+token_provider = create_azure_credential_token_provider()
+
+# Use with Azure OpenAI client
+from openai import AsyncAzureOpenAI
+client = AsyncAzureOpenAI(
+    azure_endpoint="https://your-resource.openai.azure.com",
+    azure_ad_token_provider=token_provider
+)
 ```
 
-#### SearchFilters
-```python
-from graphiti_core.search.search_filters import SearchFilters
+**Authentication Flow**:
+1. Uses `DefaultAzureCredential` to automatically discover credentials
+2. Tries multiple credential sources in order:
+   - Environment variables
+   - Managed identity
+   - Azure CLI
+   - Visual Studio Code
+   - Azure PowerShell
+3. Gets bearer token for Cognitive Services scope
+4. Returns token provider function for SDK clients
 
-# Filter nodes by labels
-filters = SearchFilters(node_labels=["Organization", "Person"])
-```
-
-### Error Codes and Messages
-
-#### Database Connection Errors
-
-**FalkorDB not running**:
-```
-Database Connection Error: FalkorDB is not running
-FalkorDB at localhost:6379 is not accessible.
-
-To start FalkorDB:
-  - Using Docker Compose: cd mcp_server && docker compose up
-  - Or run FalkorDB manually: docker run -p 6379:6379 falkordb/falkordb
-```
-
-**Neo4j not running**:
-```
-Database Connection Error: Neo4j is not running
-Neo4j at bolt://localhost:7687 is not accessible.
-
-To start Neo4j:
-  - Using Docker Compose: cd mcp_server && docker compose -f docker/docker-compose-neo4j.yml up
-  - Or install Neo4j Desktop from: https://neo4j.com/download/
-```
-
-#### Configuration Errors
-
-**Missing API key**:
-```
-ValueError: OpenAI API key is not configured. Please set the appropriate environment variable.
-```
-
-**Unsupported provider**:
-```
-ValueError: Unsupported LLM provider: invalid_provider
-```
-
-**Provider not available**:
-```
-ValueError: Azure OpenAI LLM client not available in current graphiti-core version
-```
-
-#### Validation Errors
-
-**Invalid max_facts**:
-```
-ErrorResponse: max_facts must be a positive integer
-```
-
-**No group IDs for clearing**:
-```
-ErrorResponse: No group IDs specified for clearing
-```
-
-#### Service Errors
-
-**Service not initialized**:
-```
-ErrorResponse: Graphiti service not initialized
-```
-
-**Queue service not initialized**:
-```
-RuntimeError: Queue service not initialized. Call initialize() first.
-```
-
-### Related Documentation
-
-- **Architecture Overview**: See architecture documentation for system design
-- **Graphiti Core**: https://github.com/getzep/graphiti (underlying graph library)
-- **FastMCP**: https://github.com/jlowin/fastmcp (MCP server framework)
-- **Model Context Protocol**: https://modelcontextprotocol.io/ (MCP specification)
-
-### Version Information
-
-This API reference is for Graphiti MCP Server based on:
-- Graphiti Core: Check server logs or `/app/.graphiti-core-version` in Docker
-- FastMCP: Latest compatible version
-- Python: 3.10+
+**Source**: `src/utils/utils.py:6-27`
 
 ---
 
-**Last Updated**: 2024-11-27
+## Usage Patterns
 
-**Source Files**:
-- Main Server: `src/graphiti_mcp_server.py`
+### Basic Client Connection
+
+```python
+from mcp import ClientSession, streamablehttp_client
+
+SERVER_URL = "http://localhost:8000/mcp/"
+
+async with streamablehttp_client(SERVER_URL) as (read, write, _):
+    async with ClientSession(read, write) as session:
+        # Initialize MCP session (required)
+        await session.initialize()
+
+        # Discover available tools
+        tools = await session.list_tools()
+        for tool in tools.tools:
+            print(f"Tool: {tool.name}")
+            print(f"Description: {tool.description}")
+
+        # Call a tool
+        result = await session.call_tool("get_status", {})
+        print(result)
+```
+
+**Source**: `examples/01_connect_and_discover.py`
+
+---
+
+### Adding Episodes
+
+```python
+# Add text episode
+result = await session.call_tool("add_memory", {
+    "name": "Team Meeting",
+    "episode_body": "Discussed Q4 roadmap with Alice and Bob. Decided to prioritize feature X over feature Y.",
+    "group_id": "project-alpha",
+    "source": "text",
+    "source_description": "Team meeting on 2024-11-30"
+})
+
+# Add message episode
+conversation = """User: What's the weather like today?
+Assistant: It's sunny with a high of 75°F.
+User: Perfect for a picnic!"""
+
+result = await session.call_tool("add_memory", {
+    "name": "User Conversation",
+    "episode_body": conversation,
+    "source": "message"
+})
+
+# Add JSON episode
+data = {
+    "event": "product_launch",
+    "date": "2024-12-15",
+    "products": ["Product A", "Product B"],
+    "attendees": ["Alice", "Bob", "Carol"]
+}
+
+result = await session.call_tool("add_memory", {
+    "name": "Product Launch Event",
+    "episode_body": json.dumps(data),
+    "source": "json",
+    "source_description": "Marketing event data"
+})
+```
+
+---
+
+### Searching the Knowledge Graph
+
+```python
+# Search for entities
+result = await session.call_tool("search_nodes", {
+    "query": "AI companies in San Francisco",
+    "max_nodes": 5,
+    "entity_types": ["Organization", "Location"]
+})
+
+nodes = json.loads(result.content[0].text)["nodes"]
+for node in nodes:
+    print(f"Entity: {node['name']}")
+    print(f"Type: {node['labels']}")
+    print(f"Summary: {node['summary']}")
+
+# Search for relationships
+result = await session.call_tool("search_memory_facts", {
+    "query": "employment relationships",
+    "max_facts": 10
+})
+
+facts = json.loads(result.content[0].text)["facts"]
+for fact in facts:
+    print(f"Fact: {fact['fact']}")
+    print(f"Valid from: {fact['valid_at']}")
+```
+
+---
+
+### Advanced Configuration
+
+#### Multi-Provider Setup
+
+```yaml
+# config/config.yaml
+llm:
+  provider: openai
+  model: gpt-4.1
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY}
+    anthropic:
+      api_key: ${ANTHROPIC_API_KEY}
+    azure_openai:
+      api_key: ${AZURE_OPENAI_API_KEY}
+      api_url: https://your-resource.openai.azure.com
+      deployment_name: gpt-4
+
+embedder:
+  provider: voyage
+  model: voyage-3
+  dimensions: 1024
+  providers:
+    voyage:
+      api_key: ${VOYAGE_API_KEY}
+    openai:
+      api_key: ${OPENAI_API_KEY}
+
+database:
+  provider: neo4j
+  providers:
+    neo4j:
+      uri: bolt://localhost:7687
+      username: neo4j
+      password: ${NEO4J_PASSWORD}
+```
+
+#### Custom Entity Types
+
+```yaml
+graphiti:
+  group_id: my-app
+  entity_types:
+    - name: Product
+      description: Software products, features, or services offered by the company
+    - name: Customer
+      description: Customers, clients, or users of the products
+    - name: Requirement
+      description: Product requirements, feature requests, or specifications
+    - name: Issue
+      description: Bugs, problems, or technical issues
+```
+
+#### Azure AD Authentication
+
+```yaml
+llm:
+  provider: azure_openai
+  model: gpt-4
+  providers:
+    azure_openai:
+      use_azure_ad: true  # No API key needed
+      api_url: https://your-resource.openai.azure.com
+      deployment_name: gpt-4
+      api_version: "2024-10-21"
+```
+
+---
+
+### Error Handling
+
+```python
+async def call_tool_with_retry(session, tool_name, args, max_retries=3):
+    """Call a tool with automatic retry on transient errors."""
+    for attempt in range(max_retries):
+        try:
+            result = await session.call_tool(tool_name, args)
+
+            # Parse result
+            if hasattr(result, 'content') and result.content:
+                data = json.loads(result.content[0].text)
+
+                # Check for error response
+                if 'error' in data:
+                    print(f"Tool error: {data['error']}")
+                    return None
+
+                return data
+
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"Attempt {attempt + 1} failed: {e}. Retrying...")
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                print(f"All {max_retries} attempts failed")
+                raise
+
+    return None
+
+# Usage
+result = await call_tool_with_retry(session, "search_nodes", {
+    "query": "AI companies",
+    "max_nodes": 10
+})
+```
+
+---
+
+### Health Checks
+
+```python
+async def wait_for_server(session, timeout=30):
+    """Wait for server to be healthy."""
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            result = await session.call_tool("get_status", {})
+            data = json.loads(result.content[0].text)
+
+            if data.get('status') == 'ok':
+                print("Server is healthy")
+                return True
+
+            print(f"Server status: {data.get('message')}")
+
+        except Exception as e:
+            print(f"Health check failed: {e}")
+
+        await asyncio.sleep(2)
+
+    print("Server health check timeout")
+    return False
+
+# Usage
+async with ClientSession(read, write) as session:
+    await session.initialize()
+
+    if await wait_for_server(session):
+        # Proceed with operations
+        pass
+```
+
+---
+
+### Batch Episode Processing
+
+```python
+async def add_episodes_batch(session, episodes, group_id="main"):
+    """Add multiple episodes in batch."""
+    results = []
+
+    for episode in episodes:
+        result = await session.call_tool("add_memory", {
+            "name": episode['name'],
+            "episode_body": episode['content'],
+            "group_id": group_id,
+            "source": episode.get('source', 'text')
+        })
+
+        data = json.loads(result.content[0].text)
+        results.append({
+            'name': episode['name'],
+            'success': 'message' in data,
+            'response': data
+        })
+
+        # Brief delay to avoid overwhelming the queue
+        await asyncio.sleep(0.1)
+
+    return results
+
+# Usage
+episodes = [
+    {"name": "Meeting 1", "content": "Discussed project timeline..."},
+    {"name": "Meeting 2", "content": "Reviewed budget allocation..."},
+    {"name": "Meeting 3", "content": "Planned Q1 objectives..."}
+]
+
+results = await add_episodes_batch(session, episodes, "project-alpha")
+print(f"Added {sum(r['success'] for r in results)} episodes")
+```
+
+---
+
+## Best Practices
+
+### 1. Group ID Management
+- Use meaningful group IDs to namespace knowledge (e.g., `user-123`, `project-alpha`)
+- Separate user data, project data, and system data into different groups
+- Default group ID is `main` - override for multi-tenant applications
+
+### 2. Episode Design
+- **Name episodes descriptively**: Use clear, searchable names
+- **Keep episodes focused**: One topic or interaction per episode
+- **Include context**: Use `source_description` to add temporal/source metadata
+- **Choose appropriate source type**: `text` for general content, `message` for conversations, `json` for structured data
+
+### 3. Search Optimization
+- **Use specific queries**: "AI companies in San Francisco" vs "companies"
+- **Filter by entity types**: Reduces noise and improves relevance
+- **Adjust max_nodes/max_facts**: Balance between comprehensiveness and speed
+- **Search both nodes and facts**: Nodes for entities, facts for relationships
+
+### 4. Performance
+- **Batch operations**: Add multiple episodes with small delays between calls
+- **Monitor queue sizes**: Check `get_queue_size()` if processing seems slow
+- **Use appropriate max_tokens**: Higher values for complex entity extraction
+- **Consider provider limits**: Rate limits vary by provider
+
+### 5. Configuration
+- **Use environment variables for secrets**: Never commit API keys to version control
+- **YAML for structure**: Provider configs, entity types, defaults
+- **Validate configuration**: Run `get_status` after deployment
+- **Document custom entity types**: Clear descriptions improve LLM extraction
+
+### 6. Error Handling
+- **Always check for ErrorResponse**: Tools return error objects, not exceptions
+- **Implement retries for transient errors**: Network issues, rate limits
+- **Log errors with context**: Include tool name, parameters, and error message
+- **Monitor background processing**: Episode addition is async - check logs
+
+### 7. Testing
+- **Use separate group IDs for testing**: `test-*` prefix recommended
+- **Clean up test data**: Use `clear_graph` after tests
+- **Verify connectivity**: Run health checks before test suites
+- **Test with sample data**: Start small before production workloads
+
+### 8. Security
+- **Secure API keys**: Use environment variables, secret managers, or Azure AD
+- **Validate input**: Especially for user-provided episode content
+- **Use HTTPS in production**: Protect data in transit
+- **Implement rate limiting**: Prevent abuse of public endpoints
+
+### 9. Monitoring
+- **Track episode processing**: Monitor queue sizes and processing times
+- **Watch database connections**: Check pool sizes and connection errors
+- **Monitor LLM usage**: Track token consumption and costs
+- **Set up health check endpoints**: Use `get_status` for uptime monitoring
+
+### 10. Deployment
+- **Use factory pattern**: Required for FastMCP Cloud deployment
+- **Configure logging levels**: INFO for production, DEBUG for troubleshooting
+- **Set appropriate timeouts**: Balance between reliability and responsiveness
+- **Plan for scaling**: Consider database capacity and LLM rate limits
+
+---
+
+## Index
+
+### Tools
+- [add_memory](#add_memory) - Add episodes to memory
+- [clear_graph](#clear_graph) - Clear graph data
+- [delete_entity_edge](#delete_entity_edge) - Delete relationship edges
+- [delete_episode](#delete_episode) - Delete episodes
+- [get_entity_edge](#get_entity_edge) - Retrieve specific edges
+- [get_episodes](#get_episodes) - Retrieve episodes
+- [get_status](#get_status) - Health check
+- [search_memory_facts](#search_memory_facts) - Search relationships
+- [search_nodes](#search_nodes) - Search entities
+
+### Services
+- [GraphitiService](#graphitiservice) - Graphiti client manager
+  - [initialize()](#initialize) - Initialize client
+  - [get_client()](#get_client) - Get Graphiti instance
+- [QueueService](#queueservice) - Episode queue manager
+  - [initialize()](#initialize-1) - Initialize with client
+  - [add_episode()](#add_episode) - Queue episode
+  - [get_queue_size()](#get_queue_size) - Check queue
+  - [is_worker_running()](#is_worker_running) - Check worker status
+
+### Factories
+- [LLMClientFactory](#llmclientfactory) - Create LLM clients
+  - [create()](#create) - Factory method
+- [EmbedderFactory](#embedderfactory) - Create embedder clients
+  - [create()](#create-1) - Factory method
+- [DatabaseDriverFactory](#databasedriverfactory) - Create database configs
+  - [create_config()](#create_config) - Factory method
+
+### Configuration
+- [GraphitiConfig](#graphiticonfig) - Main configuration class
+- [ServerConfig](#serverconfig) - Server settings
+- [LLMConfig](#llmconfig) - LLM settings
+- [EmbedderConfig](#embedderconfig) - Embedder settings
+- [DatabaseConfig](#databaseconfig) - Database settings
+- [GraphitiAppConfig](#graphitiappconfig) - Graphiti settings
+- [EntityTypeConfig](#entitytypeconfig) - Entity type definition
+
+### Data Models
+- [ErrorResponse](#errorresponse) - Error result
+- [SuccessResponse](#successresponse) - Success result
+- [NodeResult](#noderesult) - Entity node structure
+- [NodeSearchResponse](#nodesearchresponse) - Node search results
+- [FactSearchResponse](#factsearchresponse) - Fact search results
+- [EpisodeSearchResponse](#episodesearchresponse) - Episode results
+- [StatusResponse](#statusresponse) - Health status
+
+### Entity Types
+- [Requirement](#requirement) - Project requirements
+- [Preference](#preference) - User preferences
+- [Procedure](#procedure) - Instructions and processes
+- [Location](#location) - Physical/virtual places
+- [Event](#event) - Time-bound activities
+- [Object](#object) - Physical items
+- [Topic](#topic) - Knowledge domains
+- [Organization](#organization) - Companies and institutions
+- [Document](#document) - Information content
+
+### Utilities
+- [format_node_result()](#format_node_result) - Format entity nodes
+- [format_fact_result()](#format_fact_result) - Format relationship edges
+- [create_azure_credential_token_provider()](#create_azure_credential_token_provider) - Azure AD authentication
+
+---
+
+## Additional Resources
+
+**Source Code Locations**:
+- Main Server: `src/server.py`
 - Configuration: `src/config/schema.py`
-- Response Types: `src/models/response_types.py`
-- Entity Types: `src/models/entity_types.py`
 - Factories: `src/services/factories.py`
 - Queue Service: `src/services/queue_service.py`
-- Formatting Utils: `src/utils/formatting.py`
-- Auth Utils: `src/utils/utils.py`
-- Config Example: `config/config.yaml`
+- Response Types: `src/models/response_types.py`
+- Entity Types: `src/models/entity_types.py`
+- Utilities: `src/utils/`
+
+**Examples**:
+- Connection: `examples/01_connect_and_discover.py`
+- Tool Usage: `examples/02_call_tools.py`
+- Memory Operations: `examples/03_graphiti_memory.py`
+
+**Documentation**:
+- Component Inventory: `ra_output/architecture_20251130_170000/docs/01_component_inventory.md`
+- Data Flows: `ra_output/architecture_20251130_170000/docs/03_data_flows.md`
+
+**External Dependencies**:
+- Graphiti Core: https://github.com/getzep/graphiti-core
+- FastMCP: https://github.com/jlowin/fastmcp
+- MCP Specification: https://modelcontextprotocol.io/
+
+---
+
+*This API reference covers the main project codebase (src/) and excludes analysis frameworks (ra_*/) and virtual environments (.venv/).*

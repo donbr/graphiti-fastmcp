@@ -2,901 +2,1239 @@
 
 ## Overview
 
-The Graphiti MCP Server implements several key data flows that enable AI agents to interact with a knowledge graph through the Model Context Protocol (MCP). The system handles:
+The Graphiti MCP Server implements a layered data flow architecture that processes knowledge graph operations through the Model Context Protocol (MCP). Data flows through distinct stages: client request initiation, MCP protocol handling, tool execution, service orchestration, and database operations. The system employs async queue-based processing for write operations (episodes) and synchronous hybrid search for read operations (nodes and facts).
 
-1. **Query Flow**: Simple read operations for searching nodes and facts in the knowledge graph
-2. **Interactive Session Flow**: Client connection, initialization, and sustained communication via MCP protocol
-3. **Tool Permission/Callback Flow**: Authorization and execution of tool calls from MCP clients
-4. **MCP Server Communication Flow**: Protocol-level message handling and transport management
-5. **Message Parsing and Routing**: Request parsing and routing to appropriate tool handlers
+**Key Data Flow Characteristics:**
+- **Asynchronous Episode Processing**: Write operations are queued per group_id to prevent race conditions
+- **Hybrid Search Pattern**: Read operations use vector + keyword search directly through Graphiti Core
+- **Factory-Based Initialization**: Client instances are created via factory pattern during startup
+- **Protocol Abstraction**: FastMCP handles MCP protocol details, exposing clean tool interfaces
+- **Multi-Provider Support**: LLM/Embedder/Database clients are created dynamically based on configuration
 
-The architecture uses FastMCP as the MCP server framework, which provides decorators for defining tools and handles the low-level protocol details. The system supports multiple transports (HTTP, SSE, STDIO) and manages asynchronous episode processing through a queue-based system.
+**Primary Data Flow Types:**
+1. **Query Flow**: Client → MCP Server → Tool → GraphitiService → Graphiti Core → Database
+2. **Episode Addition Flow**: Client → MCP Server → Tool → QueueService (async) → Graphiti Core → Database
+3. **Initialization Flow**: create_server() → GraphitiService → Factories → Provider Clients → Graphiti Core
 
-## 1. Query Flow (Search Operations)
+---
 
-### Description
-
-The query flow handles read operations where clients search for nodes (entities) or facts (relationships) in the knowledge graph. This is a synchronous operation that doesn't modify the graph state. The flow uses the Graphiti Core library's search capabilities with hybrid search combining semantic embeddings and keyword matching.
+## Query Flow (Search Operations)
 
 ### Sequence Diagram
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant FastMCP
-    participant SearchTool as search_nodes/search_memory_facts
-    participant GraphitiService
-    participant GraphitiClient as Graphiti Core
-    participant Embedder
-    participant Database as FalkorDB/Neo4j
+    participant Client as MCP Client<br/>(examples/02_call_tools.py)
+    participant HTTP as HTTP Transport<br/>(streamablehttp_client)
+    participant FastMCP as FastMCP Server<br/>(server.py:199)
+    participant Tool as search_nodes()<br/>(server.py:268-312)
+    participant GraphitiSvc as GraphitiService<br/>(server.py:88-168)
+    participant Graphiti as Graphiti Core Client
+    participant DB as Graph Database<br/>(FalkorDB/Neo4j)
 
-    Client->>FastMCP: HTTP POST /mcp/ (call_tool: search_nodes)
-    FastMCP->>SearchTool: route to @mcp.tool() handler
-    SearchTool->>GraphitiService: get_client()
-    GraphitiService-->>SearchTool: return Graphiti client
+    Note over Client,DB: Client Initiates Search Query
+    Client->>HTTP: session.call_tool("search_nodes", args)
+    HTTP->>FastMCP: HTTP POST /mcp/ with JSON-RPC
+    FastMCP->>FastMCP: Parse MCP request
+    FastMCP->>Tool: Route to registered tool handler
 
-    alt search_nodes
-        SearchTool->>GraphitiClient: search_(query, config, group_ids, filters)
-        GraphitiClient->>Embedder: embed_query(query)
-        Embedder-->>GraphitiClient: query_embedding
-        GraphitiClient->>Database: hybrid search (semantic + keyword)
-        Database-->>GraphitiClient: matching nodes
-        GraphitiClient-->>SearchTool: SearchResults (nodes)
-        SearchTool->>SearchTool: format results, remove embeddings
-        SearchTool-->>FastMCP: NodeSearchResponse
-    else search_memory_facts
-        SearchTool->>GraphitiClient: search(group_ids, query, num_results)
-        GraphitiClient->>Embedder: embed_query(query)
-        Embedder-->>GraphitiClient: query_embedding
-        GraphitiClient->>Database: search entity edges
-        Database-->>GraphitiClient: matching edges
-        GraphitiClient-->>SearchTool: List[EntityEdge]
-        SearchTool->>SearchTool: format_fact_result() for each
-        SearchTool-->>FastMCP: FactSearchResponse
-    end
+    Note over Tool,DB: Tool Execution & Service Layer
+    Tool->>GraphitiSvc: get_client()
+    GraphitiSvc-->>Tool: return initialized Graphiti client
 
-    FastMCP-->>Client: JSON response with results
+    Tool->>Tool: Create SearchFilters(entity_types)
+    Tool->>Tool: Import NODE_HYBRID_SEARCH_RRF config
+
+    Tool->>Graphiti: search_(query, config, group_ids, filter)
+    Note over Graphiti,DB: Graphiti Core Processing
+    Graphiti->>Graphiti: Generate query embedding
+    Graphiti->>DB: Hybrid search: vector + keyword
+    DB->>DB: Execute Cypher query with scoring
+    DB-->>Graphiti: Return ranked nodes
+    Graphiti->>Graphiti: Calculate relevance scores
+    Graphiti-->>Tool: List[EntityNode] with metadata
+
+    Note over Tool,Client: Response Formatting & Return
+    Tool->>Tool: format_node_result() for each node
+    Tool->>Tool: Filter embeddings from attributes
+    Tool->>Tool: Create NodeSearchResponse
+    Tool-->>FastMCP: Return NodeSearchResponse
+    FastMCP->>FastMCP: Serialize to MCP format
+    FastMCP-->>HTTP: JSON-RPC response
+    HTTP-->>Client: Tool result with nodes
+    Client->>Client: parse_tool_result()
+    Client->>Client: Display results
 ```
 
-### Key Steps
+### Explanation
 
-1. **Request Reception** (`src/graphiti_mcp_server.py:410-486`)
-   - FastMCP receives HTTP POST to `/mcp/` endpoint with tool call
-   - Routes to appropriate tool handler based on tool name
-   - For `search_nodes`: handler at line 410
-   - For `search_memory_facts`: handler at line 490
+The query flow handles synchronous read operations for searching nodes (entities) in the knowledge graph. The process follows a request-response pattern through multiple layers:
 
-2. **Client Initialization** (`src/graphiti_mcp_server.py:314-320`)
-   - Tool retrieves Graphiti client via `get_client()`
-   - If client is None, initializes it with database drivers, LLM, and embedder
-   - Returns initialized client instance
+**Client Layer** (`examples/02_call_tools.py:79-96`):
+- Client initiates search using `session.call_tool("search_nodes", arguments)` from `examples/02_call_tools.py` (Lines 79-96)
+- Arguments include: query string, max_nodes, optional group_ids and entity_types
+- Uses MCP Python SDK's streamablehttp_client for HTTP transport
 
-3. **Group ID Resolution** (`src/graphiti_mcp_server.py:432-439`)
-   - Uses provided `group_ids` parameter if given
-   - Falls back to default `config.graphiti.group_id` from configuration
-   - Group IDs partition the knowledge graph into logical namespaces
+**Transport Layer** (MCP Protocol):
+- HTTP POST to `/mcp/` endpoint with JSON-RPC 2.0 formatted request
+- FastMCP framework handles protocol parsing and validation
+- Request routed to registered tool handler based on method name
 
-4. **Search Execution - Nodes** (`src/graphiti_mcp_server.py:441-457`)
-   - Creates `SearchFilters` with entity type filters if provided
-   - Uses `NODE_HYBRID_SEARCH_RRF` recipe for hybrid search
-   - Calls `client.search_()` with query, config, group_ids, and filters
-   - Embedder converts query to vector, database performs hybrid search
+**Tool Layer** (`src/server.py:268-312`):
+- `@server.tool()` decorator registers handler with FastMCP
+- Tool validates arguments and applies defaults (group_id from config)
+- Creates `SearchFilters` for entity type filtering (Lines 280)
+- Retrieves Graphiti client from GraphitiService (Line 277)
+- Uses `NODE_HYBRID_SEARCH_RRF` search configuration (Line 281-288)
 
-5. **Search Execution - Facts** (`src/graphiti_mcp_server.py:525-530`)
-   - Validates `max_facts` parameter (must be positive)
-   - Calls `client.search()` with group_ids, query, num_results, and optional center_node_uuid
-   - Returns list of `EntityEdge` objects representing relationships
+**Service Layer** (`src/server.py:162-167`):
+- GraphitiService.get_client() returns initialized Graphiti Core instance
+- Client was initialized during server startup via factory pattern
+- Service maintains connection pool to graph database
 
-6. **Result Formatting** (`src/graphiti_mcp_server.py:463-481`)
-   - Extracts nodes/edges from search results
-   - Removes embedding vectors to reduce payload size
-   - Formats timestamps as ISO strings
-   - Creates typed response objects (NodeSearchResponse or FactSearchResponse)
+**Graphiti Core Processing** (External Library):
+- Generates embedding for query using configured embedder (OpenAI/Azure/Gemini/Voyage)
+- Constructs hybrid search combining vector similarity and keyword matching
+- Executes Cypher query on Neo4j/FalkorDB with RRF (Reciprocal Rank Fusion) scoring
+- Returns ranked EntityNode objects with relevance scores
 
-7. **Response Return** (`src/graphiti_mcp_server.py:482-486`)
-   - Returns structured response with message and results array
-   - FastMCP serializes to JSON and sends HTTP response
-   - Client receives parsed results
+**Response Formatting** (`src/server.py:294-309`):
+- Converts EntityNode objects to NodeResult TypedDict format
+- Filters out embedding vectors from attributes (Line 297)
+- Includes: uuid, name, labels, created_at, summary, group_id, attributes
+- Returns NodeSearchResponse with message and nodes list
 
-### Code References
+**Client Response Parsing** (`examples/02_call_tools.py:31-44`):
+- MCP client receives TextContent with JSON string
+- Helper function extracts and parses JSON
+- Application displays results
 
-- **Search Tools**: `src/graphiti_mcp_server.py:410-540`
-  - `search_nodes()`: Lines 410-486
-  - `search_memory_facts()`: Lines 490-540
-- **Graphiti Service**: `src/graphiti_mcp_server.py:162-321`
-  - `GraphitiService.get_client()`: Lines 314-320
-  - `GraphitiService.initialize()`: Lines 172-312
-- **Formatting Utilities**: `src/utils/formatting.py:9-51`
-  - `format_node_result()`: Lines 9-29
-  - `format_fact_result()`: Lines 32-51
-- **Response Types**: `src/models/response_types.py:16-33`
+### Key Code Paths
 
-## 2. Interactive Session Flow
+**Client Connection & Tool Invocation:**
+- `examples/02_call_tools.py` (Lines 52-53): `streamablehttp_client()` context manager
+- `examples/02_call_tools.py` (Lines 79-85): `session.call_tool()` invocation
 
-### Description
+**Server Tool Registration:**
+- `src/server.py` (Lines 222-228): `_register_tools()` function with closure pattern
+- `src/server.py` (Lines 268-312): `search_nodes()` tool implementation
 
-The interactive session flow manages the lifecycle of an MCP client connection. This includes establishing the HTTP connection, performing the MCP handshake, maintaining the session, and gracefully closing resources. The flow supports both long-lived connections (for interactive clients) and short-lived request-response patterns.
+**Service & Client Management:**
+- `src/server.py` (Lines 88-168): GraphitiService class
+- `src/server.py` (Lines 98-160): `initialize()` method with factory-created clients
+- `src/server.py` (Lines 162-167): `get_client()` accessor
+
+**Response Type Definitions:**
+- `src/models/response_types.py` (Lines 16-28): NodeResult and NodeSearchResponse TypedDicts
+
+**Similar Flow for Facts:**
+- `src/server.py` (Lines 314-343): `search_memory_facts()` tool
+- Uses `client.search()` instead of `client.search_()`
+- Returns FactSearchResponse with formatted edges
+- `src/utils/formatting.py` (Lines 32-50): `format_fact_result()`
+
+---
+
+## Interactive Client Session Flow
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP Client Application<br/>(examples/01_connect_and_discover.py)
+    participant StreamHTTP as streamablehttp_client<br/>(MCP SDK Transport)
+    participant Session as ClientSession<br/>(MCP SDK)
+    participant FastMCP as FastMCP Server<br/>(server.py)
+    participant Health as /health Route<br/>(server.py:214-216)
+    participant Tools as Registered Tools<br/>(server.py:230-455)
+
+    Note over Client,Tools: Connection Establishment
+    Client->>StreamHTTP: async with streamablehttp_client(SERVER_URL)
+    StreamHTTP->>StreamHTTP: Create HTTP connection
+    StreamHTTP->>FastMCP: Establish session
+    FastMCP-->>StreamHTTP: Session ID + read/write streams
+    StreamHTTP-->>Client: (read, write, session_id)
+
+    Note over Client,Tools: MCP Protocol Handshake
+    Client->>Session: async with ClientSession(read, write)
+    Session->>Session: Create session context
+    Client->>Session: await session.initialize()
+    Session->>FastMCP: Initialize request (MCP handshake)
+    FastMCP->>FastMCP: Negotiate capabilities
+    FastMCP-->>Session: Server info + capabilities
+    Session-->>Client: Initialized session
+
+    Note over Client,Tools: Capability Discovery
+    Client->>Session: await session.list_tools()
+    Session->>FastMCP: ListTools request
+    FastMCP->>FastMCP: Gather registered @server.tool()
+    FastMCP-->>Session: ListToolsResult with tool metadata
+    Session-->>Client: tools.tools (list of Tool objects)
+    Client->>Client: Display tool names & descriptions
+
+    Note over Client,Tools: Tool Invocation (Example 1)
+    Client->>Session: call_tool("get_status", {})
+    Session->>FastMCP: JSON-RPC: tools/call
+    FastMCP->>Tools: Route to get_status()
+    Tools->>Tools: Check database connection
+    Tools-->>FastMCP: StatusResponse
+    FastMCP-->>Session: MCP result (TextContent)
+    Session-->>Client: CallToolResult
+
+    Note over Client,Tools: Tool Invocation (Example 2)
+    Client->>Session: call_tool("search_nodes", args)
+    Session->>FastMCP: JSON-RPC: tools/call
+    FastMCP->>Tools: Route to search_nodes()
+    Tools->>Tools: Execute search logic
+    Tools-->>FastMCP: NodeSearchResponse
+    FastMCP-->>Session: MCP result (TextContent)
+    Session-->>Client: CallToolResult
+
+    Note over Client,Tools: Session Cleanup
+    Client->>Session: exit context manager
+    Session->>FastMCP: Close session
+    Client->>StreamHTTP: exit context manager
+    StreamHTTP->>StreamHTTP: Close HTTP connection
+```
+
+### Explanation
+
+The interactive client session flow demonstrates the complete lifecycle of an MCP client connection, from initial handshake through capability discovery to tool invocation and cleanup.
+
+**Connection Establishment** (`examples/01_connect_and_discover.py:40-43`):
+- Client uses `streamablehttp_client(SERVER_URL)` as async context manager
+- SERVER_URL defaults to `http://localhost:8000/mcp/`
+- Transport creates HTTP connection and returns (read_stream, write_stream, session_id)
+- FastMCP server accepts connection on `/mcp/` endpoint
+
+**MCP Protocol Handshake** (`examples/01_connect_and_discover.py:43-47`):
+- ClientSession created with read/write streams as context manager
+- `session.initialize()` is REQUIRED before any operations (Line 47)
+- Performs MCP protocol version negotiation
+- Server responds with capabilities, protocol version, and server information
+- FastMCP provides server name: "Graphiti Agent Memory" and instructions
+
+**Capability Discovery** (`examples/01_connect_and_discover.py:52-61`):
+- `session.list_tools()` requests available tools from server
+- FastMCP gathers all tools registered via `@server.tool()` decorator
+- Returns ListToolsResult containing tool metadata:
+  - name: Tool identifier (e.g., "search_nodes")
+  - description: Tool documentation from docstring
+  - inputSchema: JSON schema for arguments (auto-generated from type hints)
+- Client iterates and displays tool names and descriptions
+
+**Tool Invocation Pattern** (`examples/02_call_tools.py:65-69`):
+- `session.call_tool(name, arguments)` invokes tool with JSON arguments
+- Arguments dictionary maps parameter names to values
+- FastMCP routes request to registered tool handler
+- Tool executes and returns TypedDict response
+- FastMCP serializes response to MCP format (TextContent with JSON string)
+- Client receives CallToolResult with .content list
+- Client parses TextContent to extract data
+
+**Session Lifecycle Management**:
+- Python async context managers ensure proper cleanup
+- Session context manager closes MCP session on exit
+- Transport context manager closes HTTP connection
+- Proper error handling with async exception propagation
+
+**Custom Health Check** (`src/server.py:214-216`):
+- FastMCP supports custom HTTP routes beyond MCP protocol
+- `/health` endpoint returns JSON status for monitoring
+- Used by deployment platforms (FastMCP Cloud, Kubernetes)
+
+### Key Code Paths
+
+**Client Connection & Session Management:**
+- `examples/01_connect_and_discover.py` (Lines 40-48): Connection establishment and initialization
+- `examples/01_connect_and_discover.py` (Lines 52-61): Tool discovery loop
+
+**Server Creation & Tool Registration:**
+- `src/server.py` (Lines 173-219): `create_server()` factory function
+- `src/server.py` (Lines 199-202): FastMCP server instantiation
+- `src/server.py` (Lines 205-211): Tool registration via `_register_tools()`
+- `src/server.py` (Lines 214-216): Custom health check route
+
+**Tool Invocation Examples:**
+- `examples/02_call_tools.py` (Lines 65-70): get_status() with no arguments
+- `examples/02_call_tools.py` (Lines 79-96): search_nodes() with arguments
+- `examples/03_graphiti_memory.py` (Lines 80-109): add_memory() with different source types
+
+**Response Parsing:**
+- `examples/02_call_tools.py` (Lines 31-44): `parse_tool_result()` helper function
+- `examples/03_graphiti_memory.py` (Lines 36-44): Similar parsing pattern
+
+---
+
+## Tool Permission/Callback Flow
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Factory as create_server()<br/>(server.py:173-219)
+    participant FastMCP as FastMCP Instance<br/>(server.py:199)
+    participant Register as _register_tools()<br/>(server.py:222-455)
+    participant Closure as Tool Closures<br/>(capture services)
+    participant Runtime as FastMCP Runtime
+    participant Decorator as @server.tool()
+    participant Tool as Tool Handler Function
+
+    Note over Factory,Tool: Server Initialization & Tool Registration
+    Factory->>Factory: Load GraphitiConfig from env
+    Factory->>Factory: Initialize GraphitiService
+    Factory->>Factory: Initialize QueueService
+    Factory->>FastMCP: FastMCP("Graphiti Agent Memory")
+    FastMCP-->>Factory: server instance
+
+    Factory->>Register: _register_tools(server, cfg, svc, queue)
+    Note over Register,Closure: Closure Pattern for Dependency Injection
+
+    Register->>Decorator: @server.tool() on add_memory
+    Decorator->>Closure: Create closure capturing cfg, graphiti_svc, queue_svc
+    Closure-->>Decorator: Wrapped tool function
+    Decorator->>Runtime: Register tool metadata + handler
+    Runtime->>Runtime: Store "add_memory" -> handler mapping
+    Runtime->>Runtime: Generate input schema from type hints
+
+    Register->>Decorator: @server.tool() on search_nodes
+    Decorator->>Closure: Create closure capturing graphiti_svc, cfg
+    Closure-->>Decorator: Wrapped tool function
+    Decorator->>Runtime: Register tool metadata + handler
+
+    Register->>Decorator: @server.tool() on search_memory_facts
+    Decorator->>Closure: Create closure capturing graphiti_svc, cfg
+    Decorator->>Runtime: Register tool metadata + handler
+
+    Note over Register: Repeat for all 9 tools
+    Register-->>Factory: All tools registered
+
+    Note over Factory,Tool: Runtime Tool Invocation
+    Runtime->>Runtime: Receive tools/call request
+    Runtime->>Runtime: Lookup tool handler by name
+    Runtime->>Runtime: Validate arguments against schema
+    Runtime->>Tool: Invoke handler with arguments
+
+    Tool->>Closure: Access captured cfg/graphiti_svc/queue_svc
+    Closure-->>Tool: Service instances
+    Tool->>Tool: Execute tool logic
+    Tool-->>Runtime: Return TypedDict response
+    Runtime->>Runtime: Serialize to MCP format
+```
+
+### Explanation
+
+The tool permission/callback flow uses Python closures to implement dependency injection, allowing tool handlers to access service instances without global state. This pattern is critical for the factory-based server creation required by FastMCP Cloud.
+
+**Factory Initialization Phase** (`src/server.py:173-195`):
+- `create_server()` loads configuration from environment variables and YAML files
+- GraphitiService is initialized with LLM, embedder, and database clients via factories
+- QueueService is initialized with the Graphiti client for episode processing
+- Services are fully initialized before tool registration
+- FastMCP server instance created with name and instructions (Lines 199-202)
+
+**Tool Registration via Closure Pattern** (`src/server.py:222-228`):
+- `_register_tools()` receives server instance and all service dependencies
+- Function defines tool handlers as nested functions (closures)
+- Each tool closure captures: `server`, `cfg`, `graphiti_svc`, `queue_svc` from outer scope
+- Closures allow tools to access services without global variables
+- Critical for supporting multiple server instances (testing, multi-tenant scenarios)
+
+**Decorator-Based Registration** (`src/server.py:230-455`):
+- `@server.tool()` decorator registers each handler with FastMCP
+- FastMCP extracts tool metadata from function signature:
+  - name: Function name (e.g., "add_memory")
+  - description: Docstring first line
+  - inputSchema: Auto-generated JSON schema from type hints
+- Handler stored in internal routing table
+- Type hints converted to JSON Schema for MCP protocol
+
+**Runtime Tool Invocation**:
+- MCP client sends JSON-RPC request: `{"method": "tools/call", "params": {"name": "search_nodes", "arguments": {...}}}`
+- FastMCP runtime looks up handler by tool name
+- Arguments validated against auto-generated schema
+- Handler function invoked with validated arguments
+- Closure provides access to captured service instances
+- Return value serialized to MCP TextContent format
+
+**No Permission System (Open Access)**:
+- Current implementation does not include permission/authorization checks
+- All tools are available to all connected clients
+- Could be extended with custom middleware for authentication
+- FastMCP supports custom authentication via HTTP headers
+
+**Error Handling**:
+- Tool handlers use try/except to catch errors (e.g., Lines 264-266)
+- Return ErrorResponse TypedDict with error message
+- FastMCP serializes errors as tool execution failures
+- Client receives .isError flag in CallToolResult
+
+### Key Code Paths
+
+**Server Factory & Initialization:**
+- `src/server.py` (Lines 173-219): `create_server()` async factory
+- `src/server.py` (Lines 183): GraphitiConfig loading
+- `src/server.py` (Lines 186-194): Service initialization
+- `src/server.py` (Lines 199-202): FastMCP instantiation
+
+**Tool Registration Function:**
+- `src/server.py` (Lines 222-228): `_register_tools()` signature
+- Purpose: Encapsulate tool definitions with closure-based DI
+
+**Individual Tool Handlers (Examples):**
+- `src/server.py` (Lines 230-266): `add_memory()` - captures cfg, graphiti_svc, queue_svc
+- `src/server.py` (Lines 268-312): `search_nodes()` - captures cfg, graphiti_svc
+- `src/server.py` (Lines 314-343): `search_memory_facts()` - captures cfg, graphiti_svc
+- `src/server.py` (Lines 434-455): `get_status()` - captures cfg, graphiti_svc
+
+**Service Classes Used by Closures:**
+- `src/server.py` (Lines 88-168): GraphitiService class
+- `src/services/queue_service.py` (Lines 12-153): QueueService class
+
+**Type Definitions for Responses:**
+- `src/models/response_types.py`: All response TypedDicts
+
+---
+
+## MCP Server Communication Flow
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP Client<br/>(Python SDK)
+    participant HTTP as HTTP Transport<br/>(POST /mcp/)
+    participant FastMCP as FastMCP Runtime<br/>(Protocol Handler)
+    participant Dispatcher as Request Dispatcher
+    participant ToolHandler as Tool Handler<br/>(Registered Function)
+    participant Service as Service Layer<br/>(GraphitiService)
+
+    Note over Client,Service: MCP Protocol Initialization
+    Client->>HTTP: HTTP POST /mcp/
+    Note right of Client: JSON-RPC Request:<br/>{"jsonrpc": "2.0",<br/>"method": "initialize",<br/>"id": 1}
+
+    HTTP->>FastMCP: Parse JSON-RPC envelope
+    FastMCP->>FastMCP: Validate protocol version
+    FastMCP->>FastMCP: Build server capabilities
+    FastMCP-->>HTTP: JSON-RPC Response
+    Note left of FastMCP: {"jsonrpc": "2.0",<br/>"id": 1,<br/>"result": {<br/>  "protocolVersion": "2024-11-05",<br/>  "capabilities": {...},<br/>  "serverInfo": {...}<br/>}}
+    HTTP-->>Client: Server initialization response
+
+    Note over Client,Service: Tool Discovery
+    Client->>HTTP: HTTP POST /mcp/
+    Note right of Client: {"method": "tools/list",<br/>"id": 2}
+
+    HTTP->>FastMCP: Parse request
+    FastMCP->>Dispatcher: List registered tools
+    Dispatcher->>Dispatcher: Collect tool metadata
+    Dispatcher-->>FastMCP: Tool definitions
+    FastMCP-->>HTTP: JSON-RPC Response
+    Note left of FastMCP: {"result": {<br/>  "tools": [<br/>    {<br/>      "name": "search_nodes",<br/>      "description": "...",<br/>      "inputSchema": {...}<br/>    },<br/>    ...<br/>  ]<br/>}}
+    HTTP-->>Client: Tools list
+
+    Note over Client,Service: Tool Invocation
+    Client->>HTTP: HTTP POST /mcp/
+    Note right of Client: {"method": "tools/call",<br/>"params": {<br/>  "name": "search_nodes",<br/>  "arguments": {<br/>    "query": "AI",<br/>    "max_nodes": 10<br/>  }<br/>}}
+
+    HTTP->>FastMCP: Parse JSON-RPC request
+    FastMCP->>Dispatcher: Route to tool handler
+    Dispatcher->>Dispatcher: Validate arguments vs schema
+    Dispatcher->>ToolHandler: Invoke search_nodes(query, max_nodes)
+
+    ToolHandler->>Service: get_client()
+    Service-->>ToolHandler: Graphiti client
+    ToolHandler->>ToolHandler: Execute search logic
+    ToolHandler-->>Dispatcher: NodeSearchResponse
+
+    Dispatcher->>Dispatcher: Serialize response
+    Dispatcher-->>FastMCP: Tool result
+    FastMCP->>FastMCP: Wrap in MCP format
+    FastMCP-->>HTTP: JSON-RPC Response
+    Note left of FastMCP: {"result": {<br/>  "content": [<br/>    {<br/>      "type": "text",<br/>      "text": "{...json...}"<br/>    }<br/>  ]<br/>}}
+    HTTP-->>Client: Tool execution result
+
+    Note over Client,Service: Error Handling
+    Client->>HTTP: HTTP POST /mcp/ (invalid request)
+    HTTP->>FastMCP: Parse request
+    FastMCP->>Dispatcher: Route to handler
+    Dispatcher->>Dispatcher: Validation fails
+    Dispatcher-->>FastMCP: Error details
+    FastMCP-->>HTTP: JSON-RPC Error Response
+    Note left of FastMCP: {"error": {<br/>  "code": -32602,<br/>  "message": "Invalid params",<br/>  "data": {...}<br/>}}
+    HTTP-->>Client: Error response
+```
+
+### Explanation
+
+The MCP server communication flow implements the Model Context Protocol specification using JSON-RPC 2.0 over HTTP. FastMCP abstracts the protocol details, allowing tool developers to focus on business logic.
+
+**MCP Protocol Foundation**:
+- JSON-RPC 2.0 is the transport layer for all MCP messages
+- Every request has: `jsonrpc`, `method`, `id`, optional `params`
+- Every response has: `jsonrpc`, `id`, `result` or `error`
+- Protocol version: "2024-11-05" (MCP specification version)
+
+**Initialization Handshake**:
+- Client sends `initialize` request with client capabilities
+- FastMCP responds with server capabilities:
+  - tools: Server provides tools (yes)
+  - resources: Server provides resources (no - Graphiti uses tools only)
+  - prompts: Server provides prompts (no)
+- serverInfo includes name and version from FastMCP
+- Instructions field provides AI assistant context (Lines 69-82)
+
+**Tool Discovery (tools/list)**:
+- Client requests list of available tools
+- FastMCP iterates registered `@server.tool()` functions
+- For each tool, extracts:
+  - name: From function name (e.g., "search_nodes")
+  - description: From function docstring
+  - inputSchema: JSON Schema auto-generated from type hints
+- Returns array of tool definitions for client to parse
+
+**Tool Invocation (tools/call)**:
+- Client specifies tool name and arguments in request params
+- FastMCP dispatcher looks up handler in registry
+- Arguments validated against auto-generated JSON schema
+- Handler function invoked with keyword arguments
+- Response serialized to MCP content format:
+  - TextContent: JSON string with tool result
+  - structuredContent: Direct JSON object (newer MCP spec)
+- Tool can return ErrorResponse which FastMCP wraps appropriately
+
+**HTTP Transport Layer** (`src/server.py:495`):
+- FastMCP runs on configurable host/port (default: 0.0.0.0:8000)
+- Endpoint: `http://localhost:8000/mcp/` for MCP protocol messages
+- Additional endpoints: `/health` for health checks (Line 214-216)
+- Uses Starlette/Uvicorn under the hood
+
+**Stdio Transport (Alternative)**:
+- FastMCP also supports stdio transport for local Claude Desktop integration
+- Uses `server.run_stdio_async()` instead of HTTP (Line 484)
+- Messages sent over stdin/stdout instead of HTTP
+- Same JSON-RPC protocol, different transport
+
+**Error Handling**:
+- Protocol errors: Invalid JSON-RPC format
+- Validation errors: Arguments don't match schema
+- Tool errors: Handler returns ErrorResponse
+- Each error type has appropriate JSON-RPC error code
+- FastMCP handles serialization of all error types
+
+**Content Types**:
+- TextContent: {"type": "text", "text": "..."}
+- structuredContent: Direct JSON object (newer spec)
+- Graphiti tools return JSON serialized in TextContent
+- Client helper functions parse TextContent back to objects
+
+### Key Code Paths
+
+**Server HTTP Runtime:**
+- `src/server.py` (Lines 495): `server.run_http_async()` - HTTP server
+- `src/server.py` (Lines 484): `server.run_stdio_async()` - Stdio alternative
+- `src/server.py` (Lines 468-479): Host/port configuration
+
+**Custom Health Route:**
+- `src/server.py` (Lines 214-216): `@server.custom_route('/health', methods=['GET'])`
+- Returns: `{"status": "healthy", "service": "graphiti-mcp"}`
+
+**MCP Instructions:**
+- `src/server.py` (Lines 69-82): GRAPHITI_MCP_INSTRUCTIONS constant
+- Passed to FastMCP constructor (Line 201)
+- Provides context for AI assistants using the server
+
+**Client-Side Protocol Handling:**
+- `examples/01_connect_and_discover.py` (Lines 40-48): Connection and initialization
+- `examples/02_call_tools.py` (Lines 52-53): HTTP transport setup
+- MCP Python SDK handles JSON-RPC serialization transparently
+
+**Response Parsing:**
+- `examples/02_call_tools.py` (Lines 31-44): Parse TextContent JSON
+- `examples/02_call_tools.py` (Lines 115-123): Handle structuredContent
+
+**FastMCP Framework:**
+- External library handling all MCP protocol details
+- Source: `from fastmcp import FastMCP`
+- Decorators: `@server.tool()`, `@server.custom_route()`
+- Runtime: Manages request routing, schema generation, serialization
+
+---
+
+## Message Parsing and Routing
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant HTTP as HTTP Request<br/>(POST /mcp/)
+    participant Starlette as Starlette/FastAPI<br/>(HTTP Framework)
+    participant FastMCP as FastMCP Runtime<br/>(MCP Protocol Layer)
+    participant JSONParser as JSON Parser<br/>(Validate JSON-RPC)
+    participant Schema as Schema Validator<br/>(Pydantic)
+    participant Router as Request Router<br/>(Method Dispatcher)
+    participant Handler as Tool Handler<br/>(User Function)
+    participant Serializer as Response Serializer<br/>(MCP Format)
+
+    Note over HTTP,Serializer: Request Reception & Parsing
+    HTTP->>Starlette: POST /mcp/ with JSON body
+    Starlette->>Starlette: Parse HTTP headers
+    Starlette->>Starlette: Read request body
+    Starlette->>FastMCP: Forward to MCP handler
+
+    FastMCP->>JSONParser: Parse JSON-RPC envelope
+    JSONParser->>JSONParser: Validate JSON syntax
+    JSONParser->>JSONParser: Check required fields:<br/>jsonrpc, method, id
+    JSONParser-->>FastMCP: Parsed request object
+
+    Note over FastMCP,Router: Protocol-Level Routing
+    FastMCP->>Router: Route based on method
+
+    alt method == "initialize"
+        Router->>Router: Build capability response
+        Router-->>FastMCP: Initialization result
+    else method == "tools/list"
+        Router->>Router: Collect registered tools
+        Router->>Router: Build tool definitions
+        Router-->>FastMCP: Tools list
+    else method == "tools/call"
+        Router->>Router: Extract tool name from params
+        Router->>Router: Lookup handler by name
+
+        alt Tool not found
+            Router-->>FastMCP: Error: Tool not found
+        else Tool found
+            Router->>Schema: Validate arguments
+            Schema->>Schema: Check against inputSchema
+
+            alt Validation fails
+                Schema-->>Router: Validation error
+                Router-->>FastMCP: Error: Invalid arguments
+            else Validation succeeds
+                Schema-->>Router: Validated arguments
+                Router->>Handler: Invoke tool(validated_args)
+
+                Note over Handler: Tool Execution
+                Handler->>Handler: Access captured services
+                Handler->>Handler: Execute business logic
+
+                alt Tool returns ErrorResponse
+                    Handler-->>Router: ErrorResponse dict
+                    Router-->>FastMCP: Tool error
+                else Tool succeeds
+                    Handler-->>Router: SuccessResponse/Result dict
+                    Router-->>FastMCP: Tool result
+                end
+            end
+        end
+    else method == unknown
+        Router-->>FastMCP: Error: Method not found
+    end
+
+    Note over FastMCP,Serializer: Response Formatting
+    FastMCP->>Serializer: Format response
+    Serializer->>Serializer: Convert to MCP content format
+    Serializer->>Serializer: Wrap in JSON-RPC envelope
+    Serializer-->>FastMCP: Serialized response
+
+    FastMCP-->>Starlette: HTTP 200 + JSON body
+    Starlette-->>HTTP: HTTP response
+```
+
+### Explanation
+
+Message parsing and routing is handled by FastMCP's internal machinery, which implements the MCP specification's JSON-RPC 2.0 protocol. The framework abstracts complexity from tool developers while ensuring protocol compliance.
+
+**HTTP Layer Processing** (Starlette/FastAPI):
+- FastMCP uses Starlette as HTTP framework (part of FastAPI ecosystem)
+- All MCP messages arrive as HTTP POST to `/mcp/` endpoint
+- HTTP headers parsed for content-type (application/json)
+- Request body read and passed to FastMCP handler
+
+**JSON-RPC Parsing**:
+- FastMCP validates JSON-RPC 2.0 envelope structure
+- Required fields: `jsonrpc` (must be "2.0"), `method`, `id`
+- Optional field: `params` (object or array)
+- Malformed JSON returns JSON-RPC parse error (-32700)
+- Invalid envelope returns JSON-RPC invalid request error (-32600)
+
+**Method-Based Routing**:
+FastMCP routes based on `method` field:
+- `initialize`: Server capability negotiation
+- `tools/list`: Discover available tools
+- `tools/call`: Execute a specific tool
+- `resources/list`, `prompts/list`: Not implemented (Graphiti uses tools only)
+- Unknown methods return "method not found" error (-32601)
+
+**Tool Lookup & Validation** (tools/call flow):
+- Extract `name` from `params.name`
+- Lookup handler in registry (populated by `@server.tool()` decorators)
+- Tool not found → error response
+- Tool found → proceed to argument validation
+
+**Schema Validation**:
+- FastMCP auto-generates JSON Schema from Python type hints
+- Example: `query: str` → `{"type": "string"}`
+- Example: `max_nodes: int = 10` → `{"type": "integer", "default": 10}`
+- Pydantic validates arguments against schema
+- Type mismatches, missing required params → validation error (-32602)
+
+**Handler Invocation**:
+- Validated arguments passed as keyword arguments to handler
+- Handler has access to captured services via closure
+- Handler executes synchronously (even if async internally)
+- Return value can be TypedDict, dict, or primitive
+
+**Error Handling Flow**:
+Tools return ErrorResponse TypedDict:
+```python
+return ErrorResponse(error="Database connection failed")
+```
+- FastMCP detects error field in response
+- Wraps in appropriate JSON-RPC error structure
+- Client receives tool execution error (not protocol error)
+
+**Success Response Flow**:
+Tools return structured data:
+```python
+return NodeSearchResponse(message="Success", nodes=[...])
+```
+- FastMCP serializes to JSON string
+- Wraps in TextContent: `{"type": "text", "text": "{\"message\":...}"}`
+- Returns in JSON-RPC result: `{"result": {"content": [...]}, "id": ...}`
+
+**Response Serialization**:
+- All Python objects serialized to JSON
+- Dates converted to ISO format
+- Embeddings filtered out (too large for transport)
+- Response wrapped in JSON-RPC envelope with matching `id`
+- HTTP 200 status with JSON content-type
+
+**Stdio Transport Alternative**:
+- Same parsing/routing logic
+- Input from stdin instead of HTTP POST
+- Output to stdout instead of HTTP response
+- Line-delimited JSON messages
+- Used for Claude Desktop integration
+
+### Key Code Paths
+
+**Server Entry Point:**
+- `src/server.py` (Lines 173-219): `create_server()` - Sets up FastMCP instance
+- `src/server.py` (Lines 199-202): FastMCP("Graphiti Agent Memory") instantiation
+
+**Tool Registration (Populates Router):**
+- `src/server.py` (Lines 222-455): `_register_tools()` function
+- Each `@server.tool()` decorator adds handler to internal registry
+
+**Response Type Definitions:**
+- `src/models/response_types.py`: TypedDict schemas
+  - ErrorResponse (Lines 8-9)
+  - SuccessResponse (Lines 12-13)
+  - NodeSearchResponse (Lines 26-28)
+  - FactSearchResponse (Lines 31-33)
+  - StatusResponse (Lines 41-43)
+
+**Type Hint to Schema Conversion (Automatic):**
+- Tool signatures define schemas, e.g.:
+  - `src/server.py` (Lines 231-237): `add_memory()` parameters
+  - `src/server.py` (Lines 269-273): `search_nodes()` parameters
+- FastMCP uses introspection to generate inputSchema JSON
+
+**Error Response Examples:**
+- `src/server.py` (Line 266): add_memory error handling
+- `src/server.py` (Line 312): search_nodes error handling
+- `src/server.py` (Line 343): search_memory_facts error handling
+
+**FastMCP Framework (External):**
+- Handles all protocol parsing, routing, and serialization
+- Provides decorators: `@server.tool()`, `@server.custom_route()`
+- Manages JSON-RPC compliance
+- Source: `from fastmcp import FastMCP`
+
+---
+
+## Episode Addition Flow (Async Queue)
 
 ### Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     participant Client as MCP Client
-    participant Transport as HTTP/SSE/STDIO
-    participant FastMCP
-    participant Session as MCP Session
-    participant InitHandler as Server Initialization
-    participant GraphitiService
-    participant Database
+    participant FastMCP as FastMCP Server
+    participant AddMem as add_memory()<br/>(server.py:230-266)
+    participant QueueSvc as QueueService<br/>(queue_service.py)
+    participant Queue as asyncio.Queue<br/>(per group_id)
+    participant Worker as Background Worker<br/>(_process_episode_queue)
+    participant Graphiti as Graphiti Core Client
+    participant LLM as LLM Provider<br/>(OpenAI/Azure/etc)
+    participant Embedder as Embedder Provider
+    participant DB as Graph Database
 
-    Note over Client,Database: Session Establishment
-    Client->>Transport: connect(server_url)
-    Transport->>FastMCP: establish connection
-    FastMCP->>Session: create session context
-    Session-->>Transport: read/write streams
-    Transport-->>Client: (read, write, session_id)
+    Note over Client,DB: Episode Addition Request (Async)
+    Client->>FastMCP: add_memory(name, episode_body, group_id)
+    FastMCP->>AddMem: Route to tool handler
 
-    Note over Client,Database: MCP Protocol Handshake
-    Client->>Session: initialize()
-    Session->>FastMCP: MCP initialize request
-    FastMCP->>InitHandler: handle initialization
-    InitHandler->>InitHandler: capability negotiation
-    InitHandler-->>FastMCP: server info, capabilities
-    FastMCP-->>Session: InitializeResult
-    Session-->>Client: initialization complete
+    AddMem->>AddMem: Determine effective_group_id
+    AddMem->>AddMem: Parse source to EpisodeType
+    AddMem->>QueueSvc: add_episode(group_id, name, content, ...)
 
-    Note over Client,Database: Service Discovery
-    Client->>Session: list_tools()
-    Session->>FastMCP: MCP list_tools request
-    FastMCP->>FastMCP: enumerate @mcp.tool() decorated functions
-    FastMCP-->>Session: ListToolsResult
-    Session-->>Client: available tools
+    Note over QueueSvc,Queue: Queue Management
+    QueueSvc->>QueueSvc: Check if queue exists for group_id
 
-    Note over Client,Database: Tool Execution
-    Client->>Session: call_tool(name, arguments)
-    Session->>FastMCP: MCP call_tool request
-    FastMCP->>GraphitiService: route to tool handler
-    GraphitiService->>GraphitiService: validate & execute
-
-    alt First database access
-        GraphitiService->>Database: test connection
-        Database-->>GraphitiService: connection OK
+    alt Queue doesn't exist
+        QueueSvc->>Queue: Create asyncio.Queue()
+        QueueSvc->>QueueSvc: Store in _episode_queues[group_id]
     end
 
-    GraphitiService-->>FastMCP: tool result
-    FastMCP-->>Session: CallToolResult
-    Session-->>Client: result.content or result.structuredContent
+    QueueSvc->>QueueSvc: Create process_episode() closure
+    Note right of QueueSvc: Closure captures:<br/>name, content,<br/>episode_type, uuid,<br/>entity_types
 
-    Note over Client,Database: Session Teardown
-    Client->>Session: close()
-    Session->>FastMCP: cleanup session
-    FastMCP->>Transport: close streams
-    Transport-->>Client: connection closed
+    QueueSvc->>Queue: put(process_episode)
+    Queue-->>QueueSvc: Episode queued
+
+    alt Worker not running
+        QueueSvc->>Worker: asyncio.create_task(_process_episode_queue)
+        Worker->>Worker: Set _queue_workers[group_id] = True
+        Note over Worker: Long-lived background task
+    end
+
+    QueueSvc-->>AddMem: Return queue position
+    AddMem-->>FastMCP: SuccessResponse("Episode queued...")
+    FastMCP-->>Client: Immediate response (async processing)
+
+    Note over Worker,DB: Background Episode Processing (Sequential)
+    loop While queue has items
+        Worker->>Queue: get() - blocks until item available
+        Queue-->>Worker: process_episode() function
+
+        Worker->>Worker: Call process_episode()
+        Note over Worker,Graphiti: Inside process_episode closure
+
+        Worker->>Graphiti: add_episode(name, episode_body, ...)
+
+        Note over Graphiti,DB: Graphiti Core Processing Pipeline
+        Graphiti->>LLM: Extract entities from episode_body
+        LLM-->>Graphiti: List of entities (JSON)
+
+        Graphiti->>Embedder: Generate embeddings for entities
+        Embedder-->>Graphiti: Entity name embeddings
+
+        Graphiti->>Graphiti: Deduplicate entities<br/>(semantic similarity)
+
+        Graphiti->>LLM: Extract relationships between entities
+        LLM-->>Graphiti: List of facts/edges (JSON)
+
+        Graphiti->>Embedder: Generate embeddings for facts
+        Embedder-->>Graphiti: Fact embeddings
+
+        Graphiti->>DB: Write EpisodicNode (episode)
+        Graphiti->>DB: Write EntityNodes (entities)
+        Graphiti->>DB: Write EntityEdges (relationships)
+        Graphiti->>DB: Create RELATES_TO edges<br/>(episode → entities)
+        DB-->>Graphiti: Success
+
+        Graphiti-->>Worker: Episode processed
+        Worker->>Queue: task_done()
+
+        alt Processing error
+            Worker->>Worker: Log error
+            Worker->>Queue: task_done() - continue
+        end
+    end
+
+    Note over Worker: Worker remains alive,<br/>waiting for next episode
 ```
 
-### Key Steps
+### Explanation
 
-1. **Connection Establishment** (`examples/01_connect_and_discover.py:40`)
-   - Client creates connection using `streamablehttp_client(SERVER_URL)`
-   - Returns tuple: (read_stream, write_stream, session_id)
-   - Uses async context manager for automatic cleanup
+The episode addition flow uses asynchronous queue-based processing to prevent race conditions when multiple episodes are added concurrently for the same group_id. This ensures sequential processing per namespace while allowing parallel processing across different groups.
 
-2. **Session Creation** (`examples/01_connect_and_discover.py:43`)
-   - Client creates `ClientSession(read, write)` with the streams
-   - Session manages MCP protocol state machine
-   - Context manager ensures proper cleanup on exit
+**Synchronous Request Phase** (`src/server.py:230-266`):
+- Client calls `add_memory()` tool with episode data
+- Handler determines effective group_id (from parameter or config default, Line 241)
+- Converts source string to EpisodeType enum (Lines 243-249)
+  - "text" → EpisodeType.text
+  - "json" → EpisodeType.json
+  - "message" → EpisodeType.message
+- Calls QueueService.add_episode() to enqueue work (Lines 251-259)
+- Returns SuccessResponse immediately (Line 261-263)
+- Client receives response before processing starts (async pattern)
 
-3. **MCP Handshake** (`examples/01_connect_and_discover.py:47`)
-   - Client calls `session.initialize()` - REQUIRED before any operations
-   - Server performs capability negotiation
-   - Establishes protocol version and supported features
-   - FastMCP framework handles this automatically
+**Queue Service Architecture** (`src/services/queue_service.py`):
+- Maintains separate asyncio.Queue for each group_id (Line 18)
+- One background worker per group_id ensures sequential processing (Line 20)
+- Prevents race conditions in knowledge graph (overlapping episodes create inconsistent entities)
+- Different groups can process in parallel
 
-4. **Service Discovery** (`examples/01_connect_and_discover.py:52`)
-   - Client calls `session.list_tools()` to discover available operations
-   - FastMCP scans for functions decorated with `@mcp.tool()`
-   - Returns `ListToolsResult` with tool metadata (name, description, parameters)
-   - Tools defined at: `src/graphiti_mcp_server.py:323-756`
+**Episode Queuing** (`src/services/queue_service.py:101-152`):
+- Creates closure function `process_episode()` capturing all parameters (Lines 128-149)
+- Closure pattern defers execution until worker retrieves from queue
+- Queue stores callable, not data - allows complex async processing
+- Checks if queue exists, creates if needed (Lines 37-38)
+- Puts closure into queue (Line 41)
 
-5. **Server Initialization** (`src/graphiti_mcp_server.py:764-907`)
-   - Server parses CLI arguments and loads YAML configuration
-   - Creates `GraphitiService` instance with configuration
-   - Initializes database drivers (FalkorDB or Neo4j)
-   - Creates LLM and Embedder clients via factories
-   - Builds database indices and constraints
-   - Initializes `QueueService` for async episode processing
+**Worker Lifecycle** (`src/services/queue_service.py:49-80`):
+- Worker started on first episode for a group_id (Lines 44-45)
+- `asyncio.create_task()` runs worker in background
+- Worker runs indefinitely, waiting for queue items (Line 59)
+- `queue.get()` blocks when queue empty (Line 62)
+- Worker processes one episode at a time (sequential)
+- `task_done()` marks completion (Line 73)
+- Worker stays alive for subsequent episodes
 
-6. **Tool Invocation** (`examples/02_call_tools.py:65-85`)
-   - Client calls `session.call_tool(name, arguments)`
-   - FastMCP deserializes arguments and routes to handler
-   - Handler executes business logic
-   - Returns `CallToolResult` with content array
+**Graphiti Core Processing** (External Library):
+Episode processing pipeline within `graphiti_client.add_episode()`:
 
-7. **Result Parsing** (`examples/02_call_tools.py:31-44`)
-   - Client extracts data from `result.content` (list of TextContent)
-   - Or uses `result.structuredContent` for direct dict access
-   - Helper function parses JSON from TextContent items
+1. **Entity Extraction** (LLM-powered):
+   - LLM analyzes episode text to identify entities (people, places, concepts)
+   - Uses configured entity types (custom Pydantic models) for structured extraction
+   - Returns JSON with entity name, type, summary, attributes
 
-8. **Session Cleanup**
-   - Context managers automatically close sessions and connections
-   - FastMCP handles stream cleanup
-   - No explicit close required with async context managers
+2. **Entity Embedding**:
+   - Each entity name embedded using configured embedder
+   - Embeddings enable semantic similarity search
+   - Used for deduplication and hybrid search
 
-### Code References
+3. **Entity Deduplication**:
+   - Compares new entities to existing ones via embedding similarity
+   - Merges if similarity above threshold (avoids "Alice" and "Alice Smith" as separate entities)
+   - Updates existing entities with new information
 
-- **Client Examples**: `examples/01_connect_and_discover.py`
-  - Connection pattern: Lines 40-48
-  - Service discovery: Lines 52-61
-- **Tool Invocation**: `examples/02_call_tools.py`
-  - Calling tools: Lines 65-97
-  - Result parsing: Lines 31-44
-- **Server Initialization**: `src/graphiti_mcp_server.py:764-907`
-  - `initialize_server()`: Lines 764-907
-- **MCP Server Definition**: `src/graphiti_mcp_server.py:148-151`
-  - FastMCP instance creation: Lines 148-151
+4. **Relationship Extraction** (LLM-powered):
+   - LLM identifies relationships between entities
+   - Each fact has: source entity, target entity, relationship type, temporal validity
+   - Example: "Alice WORKS_AT Acme Corp (valid from 2024-01-15)"
 
-## 3. Tool Permission/Callback Flow
+5. **Fact Embedding**:
+   - Relationship facts embedded for semantic search
+   - Enables finding similar relationships
 
-### Description
+6. **Database Write**:
+   - EpisodicNode created with episode content and metadata (Lines 134-142)
+   - EntityNodes written/updated for all entities
+   - EntityEdges created for all facts
+   - RELATES_TO edges connect episode to extracted entities
+   - All writes in transaction for consistency
 
-The tool permission flow in this MCP server uses FastMCP's decorator-based approach. Tools are registered via `@mcp.tool()` decorators, and FastMCP handles authorization and execution. The system doesn't implement explicit permission callbacks but relies on FastMCP's built-in tool registration and validation. The flow includes argument validation, service availability checks, and error handling.
+**Error Handling** (`src/services/queue_service.py:64-73`):
+- Try/except around episode processing (Lines 64-70)
+- Errors logged but don't crash worker (Line 68-69)
+- `task_done()` called even on error (Line 72)
+- Worker continues processing next episode
+- Failed episodes don't block queue
+
+**Queue Position Feedback**:
+- `add_episode()` returns queue position (Line 152)
+- Allows clients to estimate processing time
+- Useful for monitoring and debugging
+
+### Key Code Paths
+
+**Tool Handler (Entry Point):**
+- `src/server.py` (Lines 230-266): `add_memory()` tool
+- `src/server.py` (Lines 241): Determine effective_group_id
+- `src/server.py` (Lines 243-249): Parse source to EpisodeType
+- `src/server.py` (Lines 251-259): Call queue_svc.add_episode()
+
+**Queue Service Implementation:**
+- `src/services/queue_service.py` (Lines 12-23): QueueService class initialization
+- `src/services/queue_service.py` (Lines 92-99): `initialize()` with Graphiti client
+- `src/services/queue_service.py` (Lines 101-152): `add_episode()` method
+- `src/services/queue_service.py` (Lines 128-149): process_episode closure
+
+**Background Worker:**
+- `src/services/queue_service.py` (Lines 49-80): `_process_episode_queue()` worker
+- `src/services/queue_service.py` (Lines 59-73): Main processing loop
+- `src/services/queue_service.py` (Lines 74-80): Error handling and cleanup
+
+**Graphiti Client Call:**
+- `src/services/queue_service.py` (Lines 134-143): `self._graphiti_client.add_episode()`
+- Parameters: name, episode_body, source_description, source, group_id, reference_time, entity_types, uuid
+
+**EpisodeType Enum:**
+- From graphiti_core.nodes import EpisodeType
+- Values: text, json, message
+- Used in Line 246: `EpisodeType[source.lower()]`
+
+**Client Usage Examples:**
+- `examples/03_graphiti_memory.py` (Lines 80-93): Text episode
+- `examples/03_graphiti_memory.py` (Lines 96-109): JSON episode
+
+---
+
+## Error Handling Flow
 
 ### Sequence Diagram
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant FastMCP
-    participant Decorator as @mcp.tool()
-    participant ValidationLayer as Argument Validation
-    participant ToolHandler as Tool Function
-    participant GraphitiService
-    participant QueueService
-    participant Database
+    participant Client as MCP Client
+    participant FastMCP as FastMCP Server
+    participant Tool as Tool Handler
+    participant Service as Service Layer
+    participant Graphiti as Graphiti Core
+    participant DB as Database
 
-    Client->>FastMCP: call_tool(name, arguments)
-    FastMCP->>FastMCP: lookup registered tool
+    Note over Client,DB: Scenario 1: Invalid Tool Arguments
+    Client->>FastMCP: call_tool("search_nodes", invalid_args)
+    FastMCP->>FastMCP: Validate args against schema
+    FastMCP-->>Client: JSON-RPC error (-32602)<br/>"Invalid params"
 
-    alt Tool not found
-        FastMCP-->>Client: Error: unknown tool
+    Note over Client,DB: Scenario 2: Tool Not Found
+    Client->>FastMCP: call_tool("unknown_tool", args)
+    FastMCP->>FastMCP: Lookup tool in registry
+    FastMCP-->>Client: JSON-RPC error (-32601)<br/>"Method not found"
+
+    Note over Client,DB: Scenario 3: Service Initialization Error
+    Client->>FastMCP: call_tool("search_nodes", args)
+    FastMCP->>Tool: Route to search_nodes()
+    Tool->>Service: get_client()
+    Service->>Service: Check if client is None
+
+    alt Client not initialized
+        Service->>Service: Call initialize()
+        Service->>Service: Factory create fails
+        Service-->>Tool: Raise RuntimeError
+        Tool->>Tool: Catch exception
+        Tool-->>FastMCP: ErrorResponse(error="Failed to initialize")
+        FastMCP-->>Client: Tool result with error
     end
 
-    FastMCP->>Decorator: check tool registration
-    Decorator->>ValidationLayer: validate arguments against schema
+    Note over Client,DB: Scenario 4: Database Connection Error
+    Client->>FastMCP: call_tool("get_status", {})
+    FastMCP->>Tool: Route to get_status()
+    Tool->>Service: get_client()
+    Service-->>Tool: Graphiti client
+    Tool->>Graphiti: Test database connection
+    Graphiti->>DB: Execute test query
+    DB-->>Graphiti: Connection refused
+    Graphiti-->>Tool: Raise exception
+    Tool->>Tool: Catch exception in try/except
+    Tool-->>FastMCP: StatusResponse(status="error", message="...")
+    FastMCP-->>Client: Tool result with error status
 
-    alt Invalid arguments
-        ValidationLayer-->>FastMCP: ValidationError
-        FastMCP-->>Client: Error: invalid arguments
+    Note over Client,DB: Scenario 5: Search Query Error
+    Client->>FastMCP: call_tool("search_nodes", valid_args)
+    FastMCP->>Tool: Route to search_nodes()
+    Tool->>Service: get_client()
+    Service-->>Tool: Graphiti client
+    Tool->>Graphiti: search_(query, config, ...)
+    Graphiti->>Graphiti: Generate embedding fails
+    Graphiti-->>Tool: Raise exception
+    Tool->>Tool: Catch in try/except (Line 310)
+    Tool->>Tool: logger.error("Error searching nodes...")
+    Tool-->>FastMCP: ErrorResponse(error="Error searching nodes: ...")
+    FastMCP-->>Client: Tool result with error
+
+    Note over Client,DB: Scenario 6: Episode Processing Error (Async)
+    Client->>FastMCP: call_tool("add_memory", args)
+    FastMCP->>Tool: Route to add_memory()
+    Tool->>Service: queue_svc.add_episode()
+    Service-->>Tool: Queue position
+    Tool-->>FastMCP: SuccessResponse("Episode queued")
+    FastMCP-->>Client: Success response (async)
+
+    Note over Service,DB: Background Worker Error
+    Service->>Service: Background worker processes
+    Service->>Graphiti: add_episode()
+    Graphiti->>DB: Write to database
+    DB-->>Graphiti: Write error (constraint violation)
+    Graphiti-->>Service: Raise exception
+    Service->>Service: Catch in try/except (Line 147)
+    Service->>Service: logger.error("Failed to process episode")
+    Service->>Service: task_done() - continue
+    Note right of Service: Client already received<br/>success, error logged only
+
+    Note over Client,DB: Scenario 7: Invalid Episode UUID
+    Client->>FastMCP: call_tool("delete_episode", {"uuid": "invalid"})
+    FastMCP->>Tool: Route to delete_episode()
+    Tool->>Graphiti: EpisodicNode.get_by_uuid(driver, uuid)
+    Graphiti->>DB: Query by UUID
+    DB-->>Graphiti: No matching node
+    Graphiti-->>Tool: Raise exception (not found)
+    Tool->>Tool: Catch exception (Line 365)
+    Tool-->>FastMCP: ErrorResponse(error="Error deleting episode: ...")
+    FastMCP-->>Client: Tool result with error
+
+    Note over Client,DB: Scenario 8: Factory Provider Error
+    Note over Service: During server initialization
+    Service->>Service: LLMClientFactory.create(config)
+    Service->>Service: Validate API key
+
+    alt API key missing
+        Service->>Service: Raise ValueError
+        Service->>Service: Catch in initialize() (Line 106)
+        Service->>Service: logger.warning("Failed to create LLM client")
+        Service->>Service: Continue with llm_client=None
+        Note right of Service: Degraded mode:<br/>Some operations may fail
     end
-
-    ValidationLayer->>ToolHandler: invoke tool function(validated_args)
-
-    Note over ToolHandler,QueueService: Service Availability Check
-    ToolHandler->>ToolHandler: check graphiti_service != None
-
-    alt Service not initialized
-        ToolHandler-->>FastMCP: ErrorResponse(error='Service not initialized')
-        FastMCP-->>Client: error response
-    end
-
-    Note over ToolHandler,Database: Tool Execution
-
-    alt Write Operation (add_memory)
-        ToolHandler->>ToolHandler: validate source type (text/json/message)
-        ToolHandler->>ToolHandler: resolve group_id (arg || config default)
-        ToolHandler->>QueueService: add_episode(group_id, content, ...)
-        QueueService->>QueueService: queue episode for async processing
-        QueueService-->>ToolHandler: queued position
-        ToolHandler-->>FastMCP: SuccessResponse(message='queued')
-    else Read Operation (search_nodes, get_status)
-        ToolHandler->>GraphitiService: get_client()
-        GraphitiService-->>ToolHandler: Graphiti client
-        ToolHandler->>Database: execute query
-        Database-->>ToolHandler: results
-        ToolHandler->>ToolHandler: format results, remove sensitive data
-        ToolHandler-->>FastMCP: SuccessResponse(data=results)
-    else Delete Operation (delete_episode)
-        ToolHandler->>GraphitiService: get_client()
-        GraphitiService-->>ToolHandler: Graphiti client
-        ToolHandler->>Database: delete operation
-        Database-->>ToolHandler: confirmation
-        ToolHandler-->>FastMCP: SuccessResponse(message='deleted')
-    end
-
-    FastMCP->>FastMCP: serialize response to MCP format
-    FastMCP-->>Client: CallToolResult
 ```
 
-### Key Steps
+### Explanation
 
-1. **Tool Registration** (`src/graphiti_mcp_server.py:323-756`)
-   - Functions decorated with `@mcp.tool()` are automatically registered
-   - FastMCP extracts function signatures for argument validation
-   - Tool metadata (name, description, parameters) generated from docstrings
-   - Example: `add_memory` at line 323, `search_nodes` at line 410
+The error handling flow demonstrates how errors are caught, logged, and reported at different layers of the system. The architecture uses defensive programming with try/except blocks and returns ErrorResponse TypedDicts rather than raising exceptions to clients.
 
-2. **Request Reception and Routing** (FastMCP internal)
-   - FastMCP receives `call_tool` request from client
-   - Looks up tool in registry by name
-   - Returns error if tool not found
+**Protocol-Level Errors (FastMCP):**
+These are handled automatically by FastMCP before reaching tool handlers:
+- **Invalid JSON-RPC** (-32700): Malformed JSON in request body
+- **Invalid Request** (-32600): Missing required fields (jsonrpc, method, id)
+- **Method Not Found** (-32601): Unknown method name in request
+- **Invalid Params** (-32602): Arguments don't match auto-generated schema
+- All return standard JSON-RPC error responses
 
-3. **Argument Validation** (FastMCP internal with Pydantic)
-   - FastMCP validates arguments against function signature
-   - Uses type hints for validation (e.g., `str`, `list[str]`, `int`)
-   - Returns validation error if types don't match or required args missing
+**Tool Argument Validation:**
+FastMCP auto-generates JSON Schema from type hints and validates before invocation:
+- Type mismatches: `max_nodes: int` receives string → validation error
+- Missing required params: `query` omitted → validation error
+- Invalid enum values: Unknown source type
+- Validation errors return -32602 with detailed error message
 
-4. **Service Availability Check** (`src/graphiti_mcp_server.py:372-373`)
-   - All tools check if `graphiti_service` is initialized
-   - Returns `ErrorResponse` if service is None
-   - Example: `add_memory` checks at lines 372-373
+**Service Initialization Errors** (`src/server.py:98-160`):
+- Factory methods can fail if API keys missing or providers unavailable
+- Try/except around LLM client creation (Lines 104-107)
+- Try/except around embedder client creation (Lines 109-112)
+- Failures logged as warnings, service continues with None clients
+- Later operations may fail if clients needed but weren't created
+- get_client() raises RuntimeError if client initialization failed (Line 166)
 
-5. **Write Operation Flow - add_memory** (`src/graphiti_mcp_server.py:376-406`)
-   - Resolves effective group_id (parameter or config default) at line 377
-   - Validates and converts source to `EpisodeType` enum at lines 379-387
-   - Queues episode for async processing at lines 390-398
-   - Returns success response immediately (non-blocking) at lines 400-401
+**Database Connection Errors** (`src/server.py:434-455`):
+- get_status() tool specifically tests database connectivity
+- Executes simple Cypher query: `MATCH (n) RETURN count(n) as count` (Line 441)
+- Exceptions caught and returned in StatusResponse (Lines 450-455)
+- status="error" with descriptive message
+- Allows health checks to detect database issues
 
-6. **Read Operation Flow - search_nodes** (`src/graphiti_mcp_server.py:430-482`)
-   - Gets Graphiti client via `get_client()` at line 430
-   - Resolves group_ids with fallback to config at lines 432-439
-   - Creates search filters at lines 442-444
-   - Executes hybrid search at lines 449-454
-   - Formats results and removes embeddings at lines 463-480
+**Search Operation Errors** (`src/server.py:268-312`):
+- All search operations wrapped in try/except (Lines 276-312)
+- Possible errors:
+  - Embedding generation failure (LLM/embedder down)
+  - Database query timeout
+  - Invalid search configuration
+  - Network errors
+- logger.error() logs full stack trace (Line 311)
+- Returns ErrorResponse with user-friendly message (Line 312)
+- Client receives tool result with error field, not exception
 
-7. **Delete Operation Flow** (`src/graphiti_mcp_server.py:544-592`)
-   - Gets Graphiti client
-   - Retrieves entity/episode by UUID
-   - Calls delete method on the object
-   - Returns success confirmation
+**Episode Processing Errors** (`src/services/queue_service.py:147-149`):
+- Episode addition returns success immediately (async pattern)
+- Background worker catches exceptions during processing (Lines 147-149)
+- Errors logged: `logger.error(f'Failed to process episode {uuid}...')` (Line 148)
+- Worker continues processing next episode (doesn't crash)
+- Client never sees these errors (already received success)
+- Monitoring/logging required to detect background processing failures
 
-8. **Error Handling** (Pattern used throughout)
-   - All tools wrapped in try/except blocks
-   - Exceptions logged with `logger.error()`
-   - Returns `ErrorResponse` with error message
-   - Example pattern at lines 403-406, 483-486, 537-540
+**UUID Lookup Errors** (`src/server.py:357-367`):
+- delete_episode(), delete_entity_edge(), get_entity_edge() all lookup by UUID
+- Graphiti Core raises exception if UUID not found
+- Exceptions caught in try/except (Line 365)
+- Returns ErrorResponse with descriptive message (Line 366)
+- Examples:
+  - `delete_episode("invalid-uuid")` → "Error deleting episode: Node not found"
+  - `get_entity_edge("missing-uuid")` → "Error getting entity edge: Edge not found"
 
-9. **Response Serialization** (FastMCP internal)
-   - FastMCP serializes response objects to MCP format
-   - TypedDict responses converted to JSON
-   - Wrapped in `CallToolResult` structure
+**Factory Provider Errors** (`src/services/factories.py:75-96`):
+- `_validate_api_key()` checks if API key is None or empty (Lines 89-92)
+- Raises ValueError with helpful message: "OpenAI API key is not configured..."
+- Caught in GraphitiService.initialize() (Lines 104-112)
+- Service continues in degraded mode (some operations will fail later)
+- Alternative: Fail fast during initialization (could raise in create_server())
 
-### Code References
+**Logging Strategy**:
+- All errors logged to stderr with context
+- Log format: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`
+- Different log levels:
+  - WARNING: Expected failures (missing API key, initialization retries)
+  - ERROR: Unexpected failures (database errors, search failures)
+  - INFO: Normal operation (client initialized, episode processed)
 
-- **Tool Decorators**: `src/graphiti_mcp_server.py:323-756`
-  - `@mcp.tool()` decorator usage throughout
-  - add_memory: Lines 323-406
-  - search_nodes: Lines 410-486
-  - search_memory_facts: Lines 490-540
-  - delete operations: Lines 544-592
-  - get_status: Lines 726-755
-- **Response Types**: `src/models/response_types.py`
-  - ErrorResponse: Lines 8-9
-  - SuccessResponse: Lines 12-13
-  - NodeSearchResponse: Lines 26-28
-  - FactSearchResponse: Lines 31-33
-- **FastMCP Setup**: `src/graphiti_mcp_server.py:148-151`
-  - Server initialization with instructions
+**Client-Side Error Handling** (`examples/02_call_tools.py`):
+- Clients should check result.isError flag
+- Parse error messages from ErrorResponse.error field
+- Handle network errors (connection refused, timeout)
+- Example: Try/except around session.call_tool()
 
-## 4. MCP Server Communication Flow
-
-### Description
-
-The MCP server communication flow handles the low-level protocol details for client-server interaction. FastMCP supports three transport modes: HTTP (streamable, recommended), SSE (deprecated), and STDIO. The HTTP transport uses streaming JSON-RPC over HTTP, enabling both request-response and streaming patterns. The flow manages connection lifecycle, message framing, protocol version negotiation, and transport-specific handling.
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Transport as HTTP/SSE/STDIO Transport
-    participant Uvicorn as Uvicorn Server
-    participant FastMCP as FastMCP Framework
-    participant MCPProtocol as MCP Protocol Handler
-    participant ToolRegistry
-    participant ToolHandler
-
-    Note over Client,ToolHandler: Server Startup
-    Client->>Transport: Start server (python main.py)
-    Transport->>Uvicorn: run_http_async(transport="http")
-    Uvicorn->>FastMCP: initialize server
-    FastMCP->>ToolRegistry: register @mcp.tool() decorated functions
-    ToolRegistry-->>FastMCP: tools registered
-    FastMCP->>Uvicorn: server ready
-    Uvicorn-->>Transport: listening on host:port
-    Transport-->>Client: Server running at http://host:port/mcp/
-
-    Note over Client,ToolHandler: Client Connection
-    Client->>Transport: HTTP GET/POST to /mcp/
-    Transport->>Uvicorn: handle request
-    Uvicorn->>FastMCP: route to MCP handler
-    FastMCP->>MCPProtocol: parse MCP request
-
-    alt Initialize Request
-        MCPProtocol->>MCPProtocol: validate protocol version
-        MCPProtocol->>FastMCP: get server capabilities
-        FastMCP-->>MCPProtocol: capabilities (tools, resources, prompts)
-        MCPProtocol-->>Uvicorn: InitializeResult
-    else List Tools Request
-        MCPProtocol->>ToolRegistry: enumerate tools
-        ToolRegistry-->>MCPProtocol: tool definitions with schemas
-        MCPProtocol-->>Uvicorn: ListToolsResult
-    else Call Tool Request
-        MCPProtocol->>MCPProtocol: validate request format
-        MCPProtocol->>MCPProtocol: extract tool name and arguments
-        MCPProtocol->>ToolRegistry: lookup tool by name
-        ToolRegistry-->>MCPProtocol: tool function reference
-        MCPProtocol->>ToolHandler: invoke(arguments)
-        ToolHandler->>ToolHandler: execute business logic
-        ToolHandler-->>MCPProtocol: result or error
-        MCPProtocol->>MCPProtocol: wrap in CallToolResult
-        MCPProtocol-->>Uvicorn: CallToolResult
-    else Custom Route (/health)
-        MCPProtocol->>FastMCP: route to @mcp.custom_route
-        FastMCP->>ToolHandler: health_check()
-        ToolHandler-->>FastMCP: JSONResponse
-        FastMCP-->>Uvicorn: HTTP response
-    end
-
-    Uvicorn->>Uvicorn: serialize response to JSON
-    Uvicorn-->>Transport: HTTP response
-    Transport-->>Client: MCP response payload
-
-    Note over Client,ToolHandler: Streaming Support (HTTP transport)
-    Client->>Transport: streaming request
-    Transport->>FastMCP: enable streaming mode
-    FastMCP->>ToolHandler: invoke tool
-    ToolHandler->>FastMCP: yield partial results
-    FastMCP->>Transport: stream JSON chunks
-    Transport-->>Client: progressive results
-
-    Note over Client,ToolHandler: Error Handling
-    Client->>Transport: invalid request
-    Transport->>MCPProtocol: parse error
-    MCPProtocol->>MCPProtocol: detect error type
-    MCPProtocol-->>Transport: error response (proper MCP format)
-    Transport-->>Client: error with code and message
+**Error Response Format**:
+All tool errors use consistent ErrorResponse TypedDict:
+```python
+ErrorResponse(error="Descriptive error message")
 ```
-
-### Key Steps
-
-1. **Server Initialization** (`src/graphiti_mcp_server.py:910-951`)
-   - Parse CLI arguments at line 768-840
-   - Load YAML configuration at line 847
-   - Apply CLI overrides at line 850
-   - Initialize GraphitiService at line 889-891
-   - Initialize QueueService at line 898
-   - Configure FastMCP settings (host, port) at lines 901-904
-
-2. **Transport Selection** (`src/graphiti_mcp_server.py:916-951`)
-   - Based on `config.server.transport` value
-   - HTTP (recommended): `mcp.run_http_async(transport="http")` at line 947
-   - STDIO: `mcp.run_stdio_async()` at line 918
-   - SSE (deprecated): `mcp.run_sse_async()` at line 924
-
-3. **HTTP Transport Details** (`src/graphiti_mcp_server.py:926-947`)
-   - Binds to configured host:port (default: 0.0.0.0:8000)
-   - MCP endpoint at `/mcp/` path
-   - Supports streaming JSON-RPC
-   - Uses Uvicorn as ASGI server
-   - Logging configured at lines 99-108
-
-4. **Connection Handling** (FastMCP internal)
-   - Client connects to `/mcp/` endpoint
-   - FastMCP creates session context
-   - Returns read/write streams for bidirectional communication
-   - Session ID generated for tracking
-
-5. **Protocol Version Negotiation** (FastMCP internal)
-   - Client sends `initialize` request with supported versions
-   - Server responds with capabilities and selected version
-   - If version mismatch, returns protocol error
-
-6. **Message Framing** (FastMCP internal)
-   - HTTP: JSON-RPC over HTTP with Content-Type: application/json
-   - SSE: Server-Sent Events with event stream format
-   - STDIO: Line-delimited JSON on stdin/stdout
-
-7. **Tool Registry** (`src/graphiti_mcp_server.py:148-151`)
-   - FastMCP scans for `@mcp.tool()` decorated functions
-   - Extracts function signatures and docstrings
-   - Generates JSON schema for parameters
-   - Registers in internal tool registry
-
-8. **Request Routing** (FastMCP internal)
-   - Parses incoming JSON-RPC request
-   - Identifies method (initialize, list_tools, call_tool, etc.)
-   - Routes to appropriate handler
-   - Validates request structure
-
-9. **Custom Routes** (`src/graphiti_mcp_server.py:758-761`)
-   - `@mcp.custom_route()` decorator for non-MCP endpoints
-   - Health check endpoint at `/health` (line 758)
-   - Returns standard HTTP responses (not MCP protocol)
-   - Useful for load balancers and monitoring
-
-10. **Logging Configuration** (`src/graphiti_mcp_server.py:80-108`)
-    - Structured logging with timestamps
-    - Log format: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`
-    - Uvicorn logging configured to match format at lines 99-108
-    - Reduces noise from MCP framework logs
-
-11. **Error Response Format** (FastMCP internal)
-    - MCP protocol errors wrapped in standard format
-    - Includes error code and message
-    - Tool errors returned as ErrorResponse objects
-    - HTTP errors (404, 500) handled by Uvicorn
-
-### Code References
-
-- **Server Startup**: `src/graphiti_mcp_server.py:910-967`
-  - `run_mcp_server()`: Lines 910-951
-  - `main()`: Lines 954-963
-- **Initialization**: `src/graphiti_mcp_server.py:764-907`
-  - `initialize_server()`: Lines 764-907
-- **Transport Configuration**: `src/graphiti_mcp_server.py:916-951`
-  - STDIO mode: Lines 917-918
-  - SSE mode: Lines 919-924
-  - HTTP mode: Lines 925-947
-- **FastMCP Setup**: `src/graphiti_mcp_server.py:148-151`
-  - Server instance with instructions
-- **Logging Setup**: `src/graphiti_mcp_server.py:80-108`
-  - Basic config: Lines 83-88
-  - Uvicorn integration: Lines 99-108
-- **Health Endpoint**: `src/graphiti_mcp_server.py:758-761`
-  - Custom route for monitoring
-
-## 5. Message Parsing and Routing
-
-### Description
-
-Message parsing and routing in the Graphiti MCP server is primarily handled by the FastMCP framework. The system receives JSON-RPC formatted MCP messages, parses them into structured request objects, validates arguments against function signatures, routes to appropriate handlers, and serializes responses back to MCP format. The flow includes argument type coercion, group_id resolution, episode type validation, and async queue management for write operations.
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant HTTP as HTTP Transport
-    participant FastMCP as FastMCP Parser
-    participant ArgValidator as Argument Validator
-    participant Router as Request Router
-    participant ToolHandler as Tool Handler
-    participant TypeConverter as Type Converter
-    participant GroupResolver as Group ID Resolver
-    participant QueueService
-    participant ResponseSerializer
-
-    Client->>HTTP: POST /mcp/ (JSON-RPC payload)
-    HTTP->>FastMCP: receive request body
-    FastMCP->>FastMCP: parse JSON-RPC structure
-
-    alt Invalid JSON
-        FastMCP-->>HTTP: 400 Bad Request
-        HTTP-->>Client: parse error
-    end
-
-    FastMCP->>FastMCP: extract method and params
-
-    alt method: initialize
-        FastMCP->>FastMCP: handle handshake
-        FastMCP-->>HTTP: InitializeResult
-    else method: list_tools
-        FastMCP->>Router: enumerate tools
-        Router-->>FastMCP: tool definitions
-        FastMCP-->>HTTP: ListToolsResult
-    else method: call_tool
-        FastMCP->>Router: lookup tool by name
-
-        alt tool not found
-            Router-->>FastMCP: error
-            FastMCP-->>HTTP: unknown tool error
-        end
-
-        Router->>ArgValidator: validate arguments
-
-        Note over ArgValidator: Type Validation & Coercion
-        ArgValidator->>ArgValidator: check required parameters
-        ArgValidator->>ArgValidator: validate types (str, int, list[str])
-        ArgValidator->>ArgValidator: apply defaults for optional params
-
-        alt validation fails
-            ArgValidator-->>FastMCP: ValidationError
-            FastMCP-->>HTTP: argument error
-        end
-
-        ArgValidator->>ToolHandler: invoke(validated_args)
-
-        Note over ToolHandler,QueueService: Tool-Specific Processing
-
-        alt add_memory tool
-            ToolHandler->>TypeConverter: convert source to EpisodeType
-            TypeConverter->>TypeConverter: try EpisodeType[source.lower()]
-
-            alt invalid source
-                TypeConverter->>TypeConverter: default to EpisodeType.text
-                TypeConverter->>TypeConverter: log warning
-            end
-
-            TypeConverter-->>ToolHandler: EpisodeType enum value
-
-            ToolHandler->>GroupResolver: resolve group_id
-            GroupResolver->>GroupResolver: group_id || config.graphiti.group_id
-            GroupResolver-->>ToolHandler: effective_group_id
-
-            ToolHandler->>QueueService: add_episode(group_id, content, type)
-            QueueService->>QueueService: get or create queue for group_id
-            QueueService->>QueueService: queue.put(process_func)
-            QueueService->>QueueService: start worker if not running
-            QueueService-->>ToolHandler: queue position
-
-            ToolHandler->>ResponseSerializer: create SuccessResponse
-        else search_nodes tool
-            ToolHandler->>GroupResolver: resolve group_ids
-            GroupResolver-->>ToolHandler: effective_group_ids list
-
-            ToolHandler->>ToolHandler: create SearchFilters
-            ToolHandler->>ToolHandler: execute search
-            ToolHandler->>ToolHandler: format results, remove embeddings
-            ToolHandler->>ResponseSerializer: create NodeSearchResponse
-        else get_status tool
-            ToolHandler->>ToolHandler: test database connection
-            ToolHandler->>ResponseSerializer: create StatusResponse
-        end
-
-        ResponseSerializer->>ResponseSerializer: serialize to dict
-        ResponseSerializer-->>FastMCP: response object
-
-        FastMCP->>FastMCP: wrap in CallToolResult
-        FastMCP->>FastMCP: create content array
-        FastMCP->>FastMCP: serialize to JSON
-        FastMCP-->>HTTP: JSON-RPC response
-    end
-
-    HTTP->>HTTP: set Content-Type: application/json
-    HTTP-->>Client: HTTP 200 with MCP response
-```
-
-### Key Steps
-
-1. **JSON-RPC Parsing** (FastMCP internal)
-   - Receives HTTP POST body as bytes
-   - Parses as JSON-RPC 2.0 format
-   - Extracts: jsonrpc version, method, params, id
-   - Validates JSON structure
-
-2. **Method Identification** (FastMCP internal)
-   - Reads `method` field from request
-   - Common methods: `initialize`, `list_tools`, `call_tool`, `list_resources`, `list_prompts`
-   - Routes to appropriate internal handler
-
-3. **Tool Name Resolution** (FastMCP internal for call_tool)
-   - Extracts tool name from params
-   - Looks up in tool registry (populated from `@mcp.tool()` decorators)
-   - Returns error if tool not found
-
-4. **Argument Extraction and Validation** (FastMCP internal with Pydantic)
-   - Extracts `arguments` object from params
-   - Matches against function signature
-   - Validates types using Pydantic or type hints
-   - Returns validation error for type mismatches
-
-5. **Type Conversion - EpisodeType** (`src/graphiti_mcp_server.py:379-387`)
-   - For `add_memory` tool, converts `source` string to enum
-   - Tries `EpisodeType[source.lower()]` lookup
-   - Falls back to `EpisodeType.text` if invalid
-   - Logs warning for unknown types
-
-6. **Group ID Resolution** (`src/graphiti_mcp_server.py:377-439`)
-   - Pattern: `effective_group_id = group_id or config.graphiti.group_id`
-   - For lists: `effective_group_ids = group_ids if group_ids is not None else [config.graphiti.group_id]`
-   - Ensures every operation has a group context
-   - Used in all search and modify operations
-
-7. **Queue-Based Routing for Write Operations** (`src/graphiti_mcp_server.py:390-398`)
-   - `add_memory` submits to QueueService instead of executing directly
-   - Creates async processing function closure
-   - Queues by group_id to ensure sequential processing
-   - Returns immediately with success message (non-blocking)
-
-8. **Queue Service Processing** (`src/services/queue_service.py:24-152`)
-   - `add_episode_task()` adds to group-specific queue (lines 24-47)
-   - Worker task `_process_episode_queue()` processes sequentially (lines 49-80)
-   - Actual Graphiti processing in closure at lines 128-149
-   - Error handling logs failures but continues processing
-
-9. **Response Formatting** (Pattern throughout tools)
-   - Tools return TypedDict objects (SuccessResponse, ErrorResponse, etc.)
-   - Dates converted to ISO strings
-   - Embeddings removed from results
-   - Structured data (nodes, facts) in typed arrays
-
-10. **Response Serialization** (FastMCP internal)
-    - Wraps result in `CallToolResult` object
-    - Creates `content` array with `TextContent` items
-    - May also populate `structuredContent` for direct dict access
-    - Serializes to JSON-RPC response
-
-11. **Error Response Handling** (Pattern throughout)
-    - Exceptions caught in try/except blocks
-    - Logged with `logger.error()`
-    - Returns `ErrorResponse(error=error_message)`
-    - FastMCP serializes to MCP error format
-
-12. **Custom Route Handling** (`src/graphiti_mcp_server.py:758-761`)
-    - `@mcp.custom_route()` bypasses MCP protocol
-    - Returns standard HTTP responses (e.g., JSONResponse)
-    - Used for health checks and monitoring endpoints
-
-### Code References
-
-- **Message Routing**: FastMCP framework (internal)
-  - Tool registration via decorators
-  - Automatic argument validation
-  - Response serialization
-- **Tool Handlers**: `src/graphiti_mcp_server.py:323-756`
-  - add_memory: Lines 323-406 (with type conversion and queue routing)
-  - search_nodes: Lines 410-486 (with group ID resolution)
-  - search_memory_facts: Lines 490-540
-  - get_status: Lines 726-755
-- **Type Conversion**: `src/graphiti_mcp_server.py:379-387`
-  - EpisodeType enum conversion
-- **Group ID Resolution**: Multiple locations
-  - add_memory: Line 377
-  - search_nodes: Lines 432-439
-  - search_memory_facts: Lines 517-523
-  - get_episodes: Lines 642-648
-- **Queue Service**: `src/services/queue_service.py`
-  - add_episode_task: Lines 24-47
-  - _process_episode_queue: Lines 49-80
-  - add_episode: Lines 101-152
-- **Response Types**: `src/models/response_types.py`
-  - TypedDict definitions for all response types
-- **Configuration Loading**: `src/config/schema.py`
-  - YamlSettingsSource: Lines 16-74 (custom settings parser)
-  - GraphitiConfig: Lines 230-293 (unified configuration)
-
-## Data Flow Summary
-
-### Request/Response Patterns
-
-The Graphiti MCP Server implements three primary request/response patterns:
-
-1. **Synchronous Read Pattern** (search_nodes, search_memory_facts, get_episodes, get_entity_edge)
-   - Request → Parse → Validate → Execute → Format → Response
-   - Blocking until database query completes
-   - Typical response time: 100-500ms depending on query complexity
-   - Example: `src/graphiti_mcp_server.py:410-486`
-
-2. **Asynchronous Write Pattern** (add_memory)
-   - Request → Parse → Validate → Queue → Immediate Response
-   - Non-blocking, returns success before processing
-   - Actual graph update happens in background worker
-   - Sequential processing per group_id to avoid race conditions
-   - Example: `src/graphiti_mcp_server.py:390-398`
-
-3. **Synchronous Delete Pattern** (delete_episode, delete_entity_edge)
-   - Request → Parse → Validate → Execute → Confirm → Response
-   - Blocking until deletion completes
-   - Returns confirmation of deletion
-   - Example: `src/graphiti_mcp_server.py:544-592`
-
-### Error Handling Flow
-
-Error handling follows a consistent pattern throughout the system:
-
-1. **Service Initialization Errors** (`src/graphiti_mcp_server.py:172-312`)
-   - Database connection failures detected at startup
-   - Friendly error messages with setup instructions
-   - Raises RuntimeError with provider-specific guidance
-   - Example: FalkorDB connection error at lines 249-258
-
-2. **Tool Execution Errors** (Pattern throughout all tools)
-   - Wrapped in try/except blocks
-   - Logged with `logger.error()` for debugging
-   - Returns `ErrorResponse(error=message)` to client
-   - Example pattern at lines 403-406, 483-486
-
-3. **Validation Errors** (FastMCP internal)
-   - Type validation errors caught before tool execution
-   - Returns MCP protocol error with details
-   - Client receives clear error message
-
-4. **Queue Processing Errors** (`src/services/queue_service.py:64-70`)
-   - Errors in background processing logged but don't stop worker
-   - Worker continues processing next items
-   - No notification to client (already received success response)
-
-5. **Database Errors** (Handled by Graphiti Core)
-   - Connection timeouts and query errors
-   - Propagated to tool handlers
-   - Converted to ErrorResponse objects
-
-### Async Processing Flow
-
-The system uses multiple async patterns for optimal performance:
-
-1. **Queue-Based Episode Processing** (`src/services/queue_service.py`)
-   - Per-group_id queues ensure sequential processing
-   - Avoids race conditions in graph updates
-   - Background worker tasks process episodes continuously
-   - Queue initialization at lines 36-39
-   - Worker lifecycle at lines 49-80
-
-2. **Semaphore-Limited Concurrency** (`src/graphiti_mcp_server.py:76`)
-   - `SEMAPHORE_LIMIT` controls max concurrent Graphiti operations
-   - Default: 10 (configurable via environment variable)
-   - Prevents overwhelming LLM API rate limits
-   - Tuning guidelines in comments at lines 49-76
-
-3. **Async Database Operations** (Graphiti Core internal)
-   - All database queries use async drivers
-   - Non-blocking I/O for Neo4j and FalkorDB
-   - Allows handling multiple client requests concurrently
-
-4. **Async Tool Handlers** (All tools use `async def`)
-   - Tools can await database operations
-   - Non-blocking execution in FastMCP event loop
-   - Supports concurrent client requests
-
-5. **Event Loop Management** (`src/graphiti_mcp_server.py:954-963`)
-   - Single event loop for entire server
-   - `asyncio.run(run_mcp_server())` at line 958
-   - Graceful shutdown on KeyboardInterrupt
-
-### Data Transformation Points
-
-Data undergoes several transformations as it flows through the system:
-
-1. **Client Request → MCP Protocol** (Client-side)
-   - Python dict → JSON-RPC formatted request
-   - Example: `examples/02_call_tools.py:65-85`
-
-2. **MCP Protocol → Python Types** (FastMCP internal)
-   - JSON-RPC → parsed method and params
-   - Arguments → type-validated Python objects
-
-3. **String → Enum Conversion** (`src/graphiti_mcp_server.py:379-387`)
-   - source string → EpisodeType enum
-   - Handles invalid values gracefully
-
-4. **Group ID Resolution** (Multiple locations)
-   - Optional parameter → effective group_id string
-   - None → config default value
-
-5. **Database Results → Response Objects** (`src/utils/formatting.py`)
-   - EntityNode objects → NodeResult dicts
-   - EntityEdge objects → Fact dicts
-   - Embedding vectors removed
-   - Dates → ISO format strings
-
-6. **Response Objects → MCP Protocol** (FastMCP internal)
-   - TypedDict → JSON serializable dict
-   - Wrapped in CallToolResult
-   - Added to content array
-
-7. **MCP Protocol → Client Objects** (Client-side)
-   - JSON response → parsed Python objects
-   - TextContent → extracted and parsed
-   - Example: `examples/02_call_tools.py:31-44`
-
-### Performance Considerations
-
-Key performance characteristics of the data flows:
-
-1. **Non-Blocking Writes**: add_memory returns immediately, processing happens asynchronously
-2. **Read Query Optimization**: Hybrid search combines semantic and keyword matching efficiently
-3. **Connection Pooling**: Database drivers manage connection pools internally
-4. **Semaphore Control**: Rate limiting prevents LLM API overload
-5. **Streaming Support**: HTTP transport supports streaming responses for large datasets
-6. **Result Filtering**: Embeddings removed from responses to reduce payload size
-
-### Security Considerations
-
-Security aspects of the data flows:
-
-1. **No Built-in Authentication**: MCP protocol doesn't include auth (use reverse proxy for production)
-2. **Group ID Isolation**: Data partitioned by group_id for multi-tenancy
-3. **API Key Protection**: LLM and embedder API keys loaded from environment variables
-4. **Embedding Exclusion**: Internal embeddings not exposed to clients
-5. **Input Validation**: FastMCP validates all tool arguments against schemas
-6. **Error Message Sanitization**: Generic error messages prevent information leakage
+- Single "error" field with string message
+- Serialized to JSON in MCP TextContent
+- Client parses and displays to user
+
+**No Retry Logic**:
+- System doesn't automatically retry failed operations
+- Clients must implement retry logic if desired
+- Queue workers don't retry failed episodes (logged and skipped)
+- Could be extended with exponential backoff for transient errors
+
+### Key Code Paths
+
+**Tool Error Handling Examples:**
+- `src/server.py` (Lines 264-266): add_memory error handling
+- `src/server.py` (Lines 310-312): search_nodes error handling
+- `src/server.py` (Lines 341-343): search_memory_facts error handling
+- `src/server.py` (Lines 353-355): delete_entity_edge error handling
+- `src/server.py` (Lines 365-367): delete_episode error handling
+- `src/server.py` (Lines 414-416): get_episodes error handling
+- `src/server.py` (Lines 430-432): clear_graph error handling
+- `src/server.py` (Lines 450-455): get_status error handling
+
+**Service Initialization Error Handling:**
+- `src/server.py` (Lines 104-107): LLM client creation try/except
+- `src/server.py` (Lines 109-112): Embedder client creation try/except
+- `src/server.py` (Lines 158-160): Overall initialization error handling
+
+**Queue Worker Error Handling:**
+- `src/services/queue_service.py` (Lines 64-73): Episode processing try/except/finally
+- `src/services/queue_service.py` (Lines 74-80): Worker cancellation and cleanup
+
+**Factory Validation:**
+- `src/services/factories.py` (Lines 75-96): `_validate_api_key()` function
+- Raises ValueError if API key missing
+
+**Error Response Type:**
+- `src/models/response_types.py` (Lines 8-9): ErrorResponse TypedDict
+
+**Logging Configuration:**
+- `src/server.py` (Lines 51-66): Logging setup with format and levels
+
+---
+
+## Summary
+
+The Graphiti MCP Server implements sophisticated data flows that balance synchronous request-response patterns for queries with asynchronous queue-based processing for writes. Key architectural insights:
+
+**Data Flow Patterns:**
+1. **Synchronous Query Flow**: Direct path from client → FastMCP → tool → service → Graphiti Core → database for read operations (search_nodes, search_memory_facts, get_episodes)
+2. **Asynchronous Write Flow**: Client receives immediate response while background workers process episodes sequentially per group_id to prevent race conditions
+3. **Factory-Based Initialization**: Server components created via factory pattern during startup, enabling clean dependency injection through closures
+4. **Protocol Abstraction**: FastMCP handles all MCP protocol complexity (JSON-RPC parsing, schema validation, serialization), allowing tool developers to focus on business logic
+
+**Critical Design Decisions:**
+- **Queue per group_id**: Prevents concurrent modifications to same knowledge namespace while allowing parallel processing across different groups
+- **Closure-based DI**: Services captured in tool closures enable factory pattern without global state, essential for FastMCP Cloud deployment
+- **Immediate async responses**: Episode additions return success before processing, providing better UX but requiring monitoring for background errors
+- **Hybrid search strategy**: Combines vector similarity and keyword matching for robust entity/fact retrieval
+
+**Data Transformation Pipeline:**
+- **Input**: Raw text/JSON/messages from MCP clients
+- **Extraction**: LLM identifies entities and relationships from episodes
+- **Embedding**: Vector representations for semantic similarity
+- **Deduplication**: Merging semantically similar entities
+- **Storage**: Graph database with temporal metadata
+- **Retrieval**: Hybrid search with relevance ranking
+- **Output**: Formatted JSON responses via MCP protocol
+
+**Error Handling Strategy:**
+- Multi-layered error handling: Protocol errors (FastMCP) → validation errors (schema) → service errors (try/except) → tool errors (ErrorResponse)
+- Graceful degradation: Missing providers logged as warnings, service continues in degraded mode
+- Background error isolation: Queue worker errors don't crash other workers or affect client responses
+
+**Performance Characteristics:**
+- Read operations: Synchronous, latency depends on database query and embedding generation
+- Write operations: Async queued, immediate response to client, sequential processing per group
+- Concurrent processing: Multiple groups processed in parallel, single group sequential
+- Connection pooling: Maintained by Graphiti Core for database efficiency
+
+The architecture successfully balances simplicity (clean tool interfaces), scalability (async processing), and reliability (error isolation, sequential consistency) while maintaining MCP protocol compliance.

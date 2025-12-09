@@ -50,16 +50,12 @@ uv run scripts/import_graph.py --input backups/backup.json --group-id my_project
    - Closure-based tool registration (no global state)
    - Supports HTTP (default) and stdio transports
    - Tool decorators with type-safe validation
-   - **Middleware stack** (`src/middleware/`):
-     - `BearerTokenAuthMiddleware`: JWT-style API key authentication
-     - `RoleBasedAuthorizationMiddleware`: Policy-based access control
    - Legacy: `src/graphiti_mcp_server.py` (preserved for backward compatibility)
 
 2. **Services Layer** (`src/services/`)
    - GraphitiService: Client lifecycle management
    - QueueService: Async episode processing with per-group_id queues
    - Factories: Runtime provider selection (LLM, Embedder, Database)
-   - AuthService: API key validation and principal extraction
 
 3. **Core Integration Layer** (Graphiti Framework)
    - Automatic entity/relationship extraction from episodes
@@ -289,65 +285,9 @@ SEMAPHORE_LIMIT=10  # Concurrent episode processing limit
 - **Use `.gitignore`** to protect `backups/` directory containing graph exports
 - **Verify `.gitignore`** before committing: `git check-ignore -v backups/`
 
-### Authentication & Authorization
+### FastMCP Cloud Authentication
 
-The server supports optional authentication and role-based access control (RBAC) via FastMCP middleware.
-
-**Enable/Disable Authentication:**
-```bash
-# In .env file
-GRAPHITI_AUTH_ENABLED=true  # Default: true
-
-# Configure API keys (format: sk_<env>_<random>)
-GRAPHITI_API_KEY_ADMIN=sk_prod_admin123...
-GRAPHITI_API_KEY_READONLY=sk_prod_readonly456...
-GRAPHITI_API_KEY_ANALYST=sk_prod_analyst789...
-```
-
-**Authentication Flow:**
-1. Client includes bearer token in request: `Authorization: Bearer sk_prod_admin123...`
-2. `BearerTokenAuthMiddleware` validates token and extracts principal (user_id, role)
-3. `RoleBasedAuthorizationMiddleware` checks tool access against policy file
-4. Request succeeds or returns 403 Forbidden
-
-**Security Model:**
-- `on_call_tool`: **STRICT** - Blocks execution without valid token
-- `on_list_tools`: **PERMISSIVE** - Allows discovery for `fastmcp inspect` (build step)
-- `on_initialize`: **PERMISSIVE** - Allows handshake without immediate auth
-
-**Default Roles** (defined in `config/mcp_policies.json`):
-
-| Role | Allowed Tools | Use Case |
-|------|---------------|----------|
-| `admin` | `*` (all tools) | Full administrative access |
-| `readonly` | search_nodes, search_memory_facts, get_episodes, get_entity_edge, get_status | Read-only data access |
-| `analyst` | readonly tools + add_memory | Data analysis with write capability |
-
-**Custom Policies:**
-
-Edit `config/mcp_policies.json` to create custom roles:
-
-```json
-{
-  "version": "1.0",
-  "policies": [
-    {
-      "role": "custom_role",
-      "resources": ["search_nodes", "add_memory"],
-      "description": "Custom access pattern"
-    }
-  ]
-}
-```
-
-**Disable Authentication:**
-
-```bash
-# In .env file
-GRAPHITI_AUTH_ENABLED=false
-```
-
-When disabled, all tool calls are allowed without authentication.
+For production deployments on FastMCP Cloud, authentication is handled at the platform level. See [reference/FASTMCP_SECURITY_WALKTHROUGH.md](reference/FASTMCP_SECURITY_WALKTHROUGH.md) for detailed setup instructions.
 
 ## Testing
 

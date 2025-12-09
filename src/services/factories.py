@@ -333,7 +333,7 @@ class EmbedderFactory:
                 gemini_config = GeminiEmbedderConfig(
                     api_key=api_key,
                     embedding_model=config.model or 'models/text-embedding-004',
-                    embedding_dim=config.dimensions or 768,
+                    embedding_dim=config.dimensions or 1024,  # Match graphiti_core default
                 )
                 return GeminiEmbedder(config=gemini_config)
 
@@ -353,7 +353,7 @@ class EmbedderFactory:
                 voyage_config = VoyageAIEmbedderConfig(
                     api_key=api_key,
                     embedding_model=config.model or 'voyage-3',
-                    embedding_dim=config.dimensions or 1024,
+                    embedding_dim=config.dimensions or 1024,  # Match graphiti_core default
                 )
                 return VoyageAIEmbedder(config=voyage_config)
 

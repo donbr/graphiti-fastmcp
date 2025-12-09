@@ -1,53 +1,84 @@
 # Graphiti Operational Scripts
 
-Utility scripts for managing and maintaining Graphiti knowledge graphs.
+Utility scripts for managing Graphiti knowledge graphs.
 
-## Setup
+## Prerequisites
 
-Ensure the Graphiti MCP server is running:
+- Graphiti MCP server running at `http://localhost:8000/mcp/`
+- Docker: `docker compose up`
+
+## Script Categories
+
+### Core Operations (Tier 1)
+
+| Script | Purpose | When to Use |
+|--------|---------|-------------|
+| `export_graph.py` | Export episodes to JSON | Before major changes, regular backups |
+| `import_graph.py` | Restore from JSON backup | Disaster recovery, environment setup |
+
+### Bootstrap & Verification (Tier 2)
+
+| Script | Purpose | When to Use |
+|--------|---------|-------------|
+| `populate_meta_knowledge.py` | Create foundational episodes | Fresh environment, no backups available |
+| `verify_meta_knowledge.py` | Verify entity extraction | After adding episodes, debugging |
+
+### Monitoring & Deployment (Tier 3)
+
+| Script | Purpose | When to Use |
+|--------|---------|-------------|
+| `check_falkordb_health.py` | Monitor FalkorDB Cloud storage | Regular health checks, free tier monitoring |
+| `verify_fastmcp_cloud_readiness.py` | Pre-deployment validation | Before deploying to FastMCP Cloud |
+
+### Research Tools (Tier 4)
+
+| Script | Purpose | When to Use |
+|--------|---------|-------------|
+| `validate_qdrant.py` | Validate Qdrant docs collection | Verify documentation search MCP server |
+
+> Contains 2,670 pages: Zep Graphiti, Anthropic Claude, LangChain, Prefect, FastMCP, PydanticAI, MCP Protocol
+
+## Quick Reference
+
+### Backup & Restore
 
 ```bash
-docker compose up
+# Export a group
+uv run scripts/export_graph.py --group graphiti_meta_knowledge --output backups/
+
+# Export all groups
+uv run scripts/export_graph.py --all --output backups/
+
+# Restore from backup
+uv run scripts/import_graph.py --input backups/graphiti_meta_knowledge.json
 ```
 
-## Available Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `export_graph.py` | Export graph episodes to JSON for backup |
-| `import_graph.py` | Restore graph from JSON backup |
-| `populate_meta_knowledge.py` | Bootstrap knowledge with foundational episodes |
-| `verify_meta_knowledge.py` | Verify entity/relationship extraction |
-
-## Backup & Restore
-
-### Export a group
+### Health Monitoring
 
 ```bash
-uv run python scripts/export_graph.py --group graphiti_meta_knowledge --output backups/
+# Check FalkorDB Cloud usage (free tier: 100 MB)
+uv run scripts/check_falkordb_health.py
 ```
 
-### Export all groups
+### Deployment
 
 ```bash
-uv run python scripts/export_graph.py --all --output backups/
+# Verify ready for FastMCP Cloud
+uv run scripts/verify_fastmcp_cloud_readiness.py
 ```
 
-### Restore from backup
+## Data Migration
 
-```bash
-uv run python scripts/import_graph.py --input backups/graphiti_meta_knowledge.json
-```
+**IMPORTANT**: Do NOT use raw Cypher scripts to copy graph data. This corrupts embeddings.
 
-## Verification
+**Correct approach**:
+1. Export episodes: `uv run scripts/export_graph.py --group <id> --output backups/`
+2. Clear target if needed: Use `clear_graph` MCP tool
+3. Import via API: `uv run scripts/import_graph.py --input backups/<file>.json`
 
-After adding episodes, verify extraction completed:
+The import script uses Graphiti's MCP API which regenerates embeddings correctly.
 
-```bash
-uv run python scripts/verify_meta_knowledge.py
-```
-
-> **Note**: Entity extraction is asynchronous. Wait 15-30 seconds after adding episodes before verification.
+> **⚠️ Known Limitation**: FalkorDB vector searches may fail due to upstream bugs in `graphiti-core`. See [`research/VECTOR_INDEX_MISSING_FALKORDB.md`](../research/VECTOR_INDEX_MISSING_FALKORDB.md) for details and workarounds.
 
 ## Backup Storage Strategy
 
@@ -56,7 +87,7 @@ uv run python scripts/verify_meta_knowledge.py
 **Use when**: Fresh environment, no backups available
 
 ```bash
-uv run python scripts/populate_meta_knowledge.py
+uv run scripts/populate_meta_knowledge.py
 ```
 
 **Recovery Time**: < 2 minutes
@@ -70,10 +101,10 @@ uv run python scripts/populate_meta_knowledge.py
 
 ```bash
 # Export current state (manual backup)
-uv run python scripts/export_graph.py --all --output backups/
+uv run scripts/export_graph.py --all --output backups/
 
 # Restore from backup
-uv run python scripts/import_graph.py --input backups/graphiti_meta_knowledge.json
+uv run scripts/import_graph.py --input backups/graphiti_meta_knowledge.json
 ```
 
 **Recovery Time**: < 5 minutes
@@ -126,3 +157,9 @@ git push -u origin main
 
 - [`examples/`](../examples/) - MCP SDK learning tutorials
 - [`reference/`](../reference/) - Best practices documentation
+
+### Research Documentation
+
+- [`research/VECTOR_INDEX_MISSING_FALKORDB.md`](../research/VECTOR_INDEX_MISSING_FALKORDB.md) - **Critical**: Upstream bugs affecting FalkorDB searches
+- [`research/graphiti_migration_research_findings.md`](../research/graphiti_migration_research_findings.md) - Best practices for data migration
+- [`research/Graphiti Graph Migration FalkorDB ↔ Neo4j.md`](../research/Graphiti%20Graph%20Migration%20FalkorDB%20↔%20Neo4j.md) - Cross-backend migration

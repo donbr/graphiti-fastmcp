@@ -27,7 +27,7 @@ pending_episodes/*.json  # Queue for episodes waiting to be imported (may contai
 # blog/  # Now public - educational content under Apache 2.0
 
 # protected - original research and proprietary processes
-research/
+# research/
 
 # open source best practices - potential IP should be added to research/
 # reference/GRAPHITI_BEST_PRACTICES.md

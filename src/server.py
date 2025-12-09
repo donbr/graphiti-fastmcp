@@ -7,25 +7,22 @@ import argparse
 import asyncio
 import logging
 import os
-import secrets
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
+import fastmcp
 from dotenv import load_dotenv
+from fastmcp import FastMCP
 from graphiti_core import Graphiti
 from graphiti_core.edges import EntityEdge
 from graphiti_core.nodes import EpisodeType, EpisodicNode
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
-import fastmcp
-from fastmcp import FastMCP
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from config.schema import GraphitiConfig
-from middleware.auth import BearerTokenAuthMiddleware
-from middleware.authorization import RoleBasedAuthorizationMiddleware
 from models.response_types import (
     EpisodeSearchResponse,
     ErrorResponse,
@@ -35,7 +32,6 @@ from models.response_types import (
     StatusResponse,
     SuccessResponse,
 )
-from services.auth_service import AuthService
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
 from utils.formatting import format_fact_result
@@ -89,6 +85,7 @@ Key capabilities:
 # Service Definition
 # ------------------------------------------------------------------------------
 
+
 class GraphitiService:
     """Graphiti service using the unified configuration system."""
 
@@ -133,6 +130,7 @@ class GraphitiService:
             # Initialize Graphiti client
             if self.config.database.provider.lower() == 'falkordb':
                 from graphiti_core.driver.falkordb_driver import FalkorDriver
+
                 falkor_driver = FalkorDriver(
                     host=db_config['host'],
                     port=db_config['port'],
@@ -170,9 +168,11 @@ class GraphitiService:
             raise RuntimeError('Failed to initialize Graphiti client')
         return self.client
 
+
 # ------------------------------------------------------------------------------
 # Factory Entrypoint
 # ------------------------------------------------------------------------------
+
 
 async def create_server() -> FastMCP:
     """Factory function that creates and initializes the MCP server.
@@ -205,52 +205,9 @@ async def create_server() -> FastMCP:
         instructions=GRAPHITI_MCP_INSTRUCTIONS,
     )
 
-    # 3.5 Configure Authentication (User Story 1)
-    # API key format: sk_<env>_<random> (e.g., sk_prod_AbCdEf123...)
-    auth_enabled = os.getenv('GRAPHITI_AUTH_ENABLED', 'true').lower() == 'true'
-
-    if auth_enabled:
-        # Build API keys dictionary from environment variables
-        api_keys = {
-            os.getenv('GRAPHITI_API_KEY_ADMIN'): {'user_id': 'admin', 'role': 'admin'},
-            os.getenv('GRAPHITI_API_KEY_READONLY'): {'user_id': 'readonly', 'role': 'readonly'},
-            os.getenv('GRAPHITI_API_KEY_ANALYST'): {'user_id': 'analyst', 'role': 'analyst'},
-        }
-
-        # Filter out None keys (unset environment variables)
-        api_keys = {k: v for k, v in api_keys.items() if k is not None}
-
-        if api_keys:
-            # Initialize authentication service
-            auth_service = AuthService(api_keys)
-
-            # Create and register authentication middleware (FastMCP-compatible)
-            # Per https://gofastmcp.com/servers/middleware
-            auth_middleware = BearerTokenAuthMiddleware(auth_service)
-            server.add_middleware(auth_middleware)
-            logger.info(f'Authentication enabled with {len(api_keys)} API key(s)')
-
-            # 3.6 Configure Authorization (User Story 2)
-            # Add role-based access control using policy file
-            policy_file = os.getenv('EUNOMIA_POLICY_FILE', 'config/mcp_policies.json')
-
-            # Create and register authorization middleware (FastMCP-compatible)
-            authz_middleware = RoleBasedAuthorizationMiddleware(policy_file)
-            server.add_middleware(authz_middleware)
-            logger.info(f'Authorization enabled with policy file: {policy_file}')
-        else:
-            logger.warning('GRAPHITI_AUTH_ENABLED=true but no API keys configured. Authentication disabled.')
-    else:
-        logger.info('Authentication disabled (GRAPHITI_AUTH_ENABLED=false)')
-
     # 4. Register Tools
     # We pass the initialized services into the registration function
-    _register_tools(
-        server,
-        factory_config,
-        factory_graphiti_service,
-        factory_queue_service
-    )
+    _register_tools(server, factory_config, factory_graphiti_service, factory_queue_service)
 
     # 5. Register Custom Routes
     @server.custom_route('/health', methods=['GET'])
@@ -285,7 +242,7 @@ def _register_tools(
         """Add an episode to memory."""
         try:
             effective_group_id = group_id or cfg.graphiti.group_id
-            
+
             episode_type = EpisodeType.text
             if source:
                 try:
@@ -321,7 +278,13 @@ def _register_tools(
         """Search for nodes in the graph memory."""
         try:
             client = await graphiti_svc.get_client()
-            effective_group_ids = group_ids if group_ids is not None else [cfg.graphiti.group_id] if cfg.graphiti.group_id else []
+            effective_group_ids = (
+                group_ids
+                if group_ids is not None
+                else [cfg.graphiti.group_id]
+                if cfg.graphiti.group_id
+                else []
+            )
 
             search_filters = SearchFilters(node_labels=entity_types)
             from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
@@ -341,16 +304,18 @@ def _register_tools(
             for node in nodes:
                 attrs = node.attributes if hasattr(node, 'attributes') else {}
                 attrs = {k: v for k, v in attrs.items() if 'embedding' not in k.lower()}
-                
-                node_results.append(NodeResult(
-                    uuid=node.uuid,
-                    name=node.name,
-                    labels=node.labels if node.labels else [],
-                    created_at=node.created_at.isoformat() if node.created_at else None,
-                    summary=node.summary,
-                    group_id=node.group_id,
-                    attributes=attrs,
-                ))
+
+                node_results.append(
+                    NodeResult(
+                        uuid=node.uuid,
+                        name=node.name,
+                        labels=node.labels if node.labels else [],
+                        created_at=node.created_at.isoformat() if node.created_at else None,
+                        summary=node.summary,
+                        group_id=node.group_id,
+                        attributes=attrs,
+                    )
+                )
 
             return NodeSearchResponse(message='Nodes retrieved successfully', nodes=node_results)
         except Exception as e:
@@ -370,7 +335,13 @@ def _register_tools(
                 return ErrorResponse(error='max_facts must be a positive integer')
 
             client = await graphiti_svc.get_client()
-            effective_group_ids = group_ids if group_ids is not None else [cfg.graphiti.group_id] if cfg.graphiti.group_id else []
+            effective_group_ids = (
+                group_ids
+                if group_ids is not None
+                else [cfg.graphiti.group_id]
+                if cfg.graphiti.group_id
+                else []
+            )
 
             relevant_edges = await client.search(
                 group_ids=effective_group_ids,
@@ -431,7 +402,13 @@ def _register_tools(
         """Get episodes from the graph memory."""
         try:
             client = await graphiti_svc.get_client()
-            effective_group_ids = group_ids if group_ids is not None else [cfg.graphiti.group_id] if cfg.graphiti.group_id else []
+            effective_group_ids = (
+                group_ids
+                if group_ids is not None
+                else [cfg.graphiti.group_id]
+                if cfg.graphiti.group_id
+                else []
+            )
 
             if effective_group_ids:
                 episodes = await EpisodicNode.get_by_group_ids(
@@ -450,13 +427,17 @@ def _register_tools(
                     'name': episode.name,
                     'content': episode.content,
                     'created_at': episode.created_at.isoformat() if episode.created_at else None,
-                    'source': episode.source.value if hasattr(episode.source, 'value') else str(episode.source),
+                    'source': episode.source.value
+                    if hasattr(episode.source, 'value')
+                    else str(episode.source),
                     'source_description': episode.source_description,
                     'group_id': episode.group_id,
                 }
                 episode_results.append(episode_dict)
 
-            return EpisodeSearchResponse(message='Episodes retrieved successfully', episodes=episode_results)
+            return EpisodeSearchResponse(
+                message='Episodes retrieved successfully', episodes=episode_results
+            )
         except Exception as e:
             logger.error(f'Error getting episodes: {e}')
             return ErrorResponse(error=f'Error getting episodes: {str(e)}')
@@ -466,13 +447,17 @@ def _register_tools(
         """Clear all data from the graph for specified group IDs."""
         try:
             client = await graphiti_svc.get_client()
-            effective_group_ids = group_ids or [cfg.graphiti.group_id] if cfg.graphiti.group_id else []
+            effective_group_ids = (
+                group_ids or [cfg.graphiti.group_id] if cfg.graphiti.group_id else []
+            )
 
             if not effective_group_ids:
                 return ErrorResponse(error='No group IDs specified for clearing')
 
             await clear_data(client.driver, group_ids=effective_group_ids)
-            return SuccessResponse(message=f'Graph data cleared for group IDs: {", ".join(effective_group_ids)}')
+            return SuccessResponse(
+                message=f'Graph data cleared for group IDs: {", ".join(effective_group_ids)}'
+            )
         except Exception as e:
             logger.error(f'Error clearing graph: {e}')
             return ErrorResponse(error=f'Error clearing graph: {str(e)}')
@@ -500,9 +485,11 @@ def _register_tools(
                 message=f'Graphiti MCP server is running but database connection failed: {str(e)}',
             )
 
+
 # ------------------------------------------------------------------------------
 # Main Execution Block (Local Dev)
 # ------------------------------------------------------------------------------
+
 
 async def run_local():
     """Run the server locally using the factory pattern."""
@@ -514,7 +501,7 @@ async def run_local():
     parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--transport', choices=['http', 'stdio'], default='http')
-    
+
     # Allow unknown args (ignore Cloud/Legacy specific args)
     args, _ = parser.parse_known_args()
 
@@ -525,7 +512,7 @@ async def run_local():
         fastmcp.settings.port = args.port
 
     logger.info(f'Starting MCP server with {args.transport} transport')
-    
+
     if args.transport == 'stdio':
         await server.run_stdio_async()
     else:
@@ -537,8 +524,9 @@ async def run_local():
             handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
             uvicorn_logger.addHandler(handler)
             uvicorn_logger.propagate = False
-            
+
         await server.run_http_async()
+
 
 if __name__ == '__main__':
     try:

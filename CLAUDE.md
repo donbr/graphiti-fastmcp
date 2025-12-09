@@ -285,6 +285,10 @@ SEMAPHORE_LIMIT=10  # Concurrent episode processing limit
 - **Use `.gitignore`** to protect `backups/` directory containing graph exports
 - **Verify `.gitignore`** before committing: `git check-ignore -v backups/`
 
+### FastMCP Cloud Authentication
+
+For production deployments on FastMCP Cloud, authentication is handled at the platform level. See [reference/FASTMCP_SECURITY_WALKTHROUGH.md](reference/FASTMCP_SECURITY_WALKTHROUGH.md) for detailed setup instructions.
+
 ## Testing
 
 ### Test Structure
@@ -608,6 +612,42 @@ uv run scripts/verify_meta_knowledge.py
 - **`architecture/`** - Detailed architecture documentation including component inventory, data flows, and API reference
 - **`examples/`** - MCP SDK learning tutorials (`01_connect_and_discover.py`, `02_call_tools.py`, `03_graphiti_memory.py`, `04_mcp_concepts.py`)
 - **`scripts/`** - Operational utilities for backup/restore (`export_graph.py`, `import_graph.py`, `populate_meta_knowledge.py`, `verify_meta_knowledge.py`, `check_falkordb_health.py`)
+
+### Documentation Search Tools
+
+In addition to the Graphiti knowledge graph, you have access to comprehensive documentation search via MCP:
+
+| Tool | Coverage | Use For |
+|------|----------|---------|
+| `mcp__qdrant-docs__search_docs` | 2,670 pages across 7 frameworks (Anthropic, Zep, LangChain, Prefect, FastMCP, PydanticAI, MCP Protocol) | Semantic search of official documentation |
+| `mcp__qdrant-docs__list_sources` | Lists available documentation sources | Check what documentation is available |
+| `mcp__ai-docs-server__list_doc_sources` | 13 frameworks (llms.txt format) | List available documentation sources |
+| `mcp__ai-docs-server__fetch_docs` | Fetch specific documentation pages | Retrieve individual documentation pages |
+| `mcp__Context7__resolve-library-id` | Resolve package names to library IDs | Find Context7-compatible library IDs |
+| `mcp__Context7__get-library-docs` | Up-to-date library documentation | Get current API references and code examples |
+
+**Quick examples:**
+
+```python
+# Search Anthropic documentation for prompt caching
+mcp__qdrant-docs__search_docs(
+    query="prompt caching implementation",
+    source="Anthropic",
+    k=3
+)
+
+# List available documentation sources
+mcp__qdrant-docs__list_sources()
+
+# Get up-to-date library documentation
+mcp__Context7__get-library-docs(
+    context7CompatibleLibraryID="/anthropic/anthropic-sdk-python",
+    topic="prompt caching",
+    mode="code"
+)
+```
+
+See `QUICKSTART.md` lines 216-237 and `reference/QUICK_START_QDRANT_MCP_CLIENT.md` for detailed usage guides.
 
 ### When Working with Graphiti Knowledge Graphs
 

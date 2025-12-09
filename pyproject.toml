@@ -5,7 +5,7 @@ description = "Graphiti FastMCP Server"
 readme = "README.md"
 requires-python = ">=3.10,<4"
 dependencies = [
-    "fastmcp>=2.13.1",
+    "fastmcp>=2.13.3",
     "openai>=1.91.0",
     "graphiti-core[falkordb]==0.24.1",
     "pydantic>=2.0.0",
@@ -16,7 +16,6 @@ dependencies = [
     "claude-agent-sdk>=0.1.10",
     "langchain-openai>=1.1.0",
     "langchain-qdrant>=1.1.0",
-    "eunomia-mcp>=0.1.0",
 ]
 
 [project.optional-dependencies]

@@ -169,7 +169,8 @@ class EmbedderConfig(BaseModel):
 
     provider: str = Field(default='openai', description='Embedder provider')
     model: str = Field(default='text-embedding-3-small', description='Model name')
-    dimensions: int = Field(default=1536, description='Embedding dimensions')
+    # Default 1024 to match graphiti_core (see graphiti_core/embedder/client.py EMBEDDING_DIM)
+    dimensions: int = Field(default=1024, description='Embedding dimensions')
     providers: EmbedderProvidersConfig = Field(default_factory=EmbedderProvidersConfig)
 
 

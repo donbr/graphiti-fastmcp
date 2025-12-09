@@ -264,5 +264,5 @@ Categories:         Lesson, Best Practice, Anti-Pattern, Procedure, Architecture
 JSON Rule:          Flat structure, include id/name/description
 Verification:       get_episodes → search_nodes (5-10s) → search_memory_facts (10-15s)
 Meta-knowledge:     Always query graphiti_meta_knowledge first
-Recovery:           uv run python examples/populate_meta_knowledge.py
+Recovery:           uv run python scripts/populate_meta_knowledge.py
 ```

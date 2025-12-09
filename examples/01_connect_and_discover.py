@@ -25,7 +25,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 # Server URL - Graphiti MCP server default endpoint
-SERVER_URL = "http://localhost:8000/mcp/"
+SERVER_URL = "http://localhost:8000/mcp"
 
 
 async def main():

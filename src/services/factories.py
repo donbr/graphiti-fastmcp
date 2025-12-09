@@ -275,6 +275,7 @@ class EmbedderFactory:
                 embedder_config = OpenAIEmbedderConfig(
                     api_key=api_key,
                     embedding_model=config.model,
+                    embedding_dim=config.dimensions,
                 )
                 return OpenAIEmbedder(config=embedder_config)
 

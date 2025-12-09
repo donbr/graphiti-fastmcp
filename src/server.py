@@ -154,7 +154,19 @@ class GraphitiService:
                     max_coroutines=self.semaphore_limit,
                 )
 
-            await self.client.build_indices_and_constraints()
+            # Build indices - wrap in try/except to handle Neo4j 5.x race condition
+            # with parallel IF NOT EXISTS index creation
+            try:
+                await self.client.build_indices_and_constraints()
+            except Exception as idx_error:
+                if 'EquivalentSchemaRuleAlreadyExists' in str(idx_error):
+                    logger.warning(
+                        'Index creation race condition detected (Neo4j 5.x issue). '
+                        'Indexes likely already exist. Continuing...'
+                    )
+                else:
+                    raise
+
             logger.info('Successfully initialized Graphiti client')
 
         except Exception as e:

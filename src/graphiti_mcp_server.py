@@ -11,14 +11,14 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+import fastmcp
 from dotenv import load_dotenv
+from fastmcp import FastMCP
 from graphiti_core import Graphiti
 from graphiti_core.edges import EntityEdge
 from graphiti_core.nodes import EpisodeType, EpisodicNode
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
-import fastmcp
-from fastmcp import FastMCP
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -280,8 +280,18 @@ class GraphitiService:
                 # Re-raise other errors
                 raise
 
-            # Build indices
-            await self.client.build_indices_and_constraints()
+            # Build indices - wrap in try/except to handle Neo4j 5.x race condition
+            # with parallel IF NOT EXISTS index creation
+            try:
+                await self.client.build_indices_and_constraints()
+            except Exception as idx_error:
+                if 'EquivalentSchemaRuleAlreadyExists' in str(idx_error):
+                    logger.warning(
+                        'Index creation race condition detected (Neo4j 5.x issue). '
+                        'Indexes likely already exist. Continuing...'
+                    )
+                else:
+                    raise
 
             logger.info('Successfully initialized Graphiti client')
 
@@ -920,7 +930,9 @@ async def run_mcp_server():
         logger.info(
             f'Running MCP server with SSE transport on {fastmcp.settings.host}:{fastmcp.settings.port}'
         )
-        logger.info(f'Access the server at: http://{fastmcp.settings.host}:{fastmcp.settings.port}/sse')
+        logger.info(
+            f'Access the server at: http://{fastmcp.settings.host}:{fastmcp.settings.port}/sse'
+        )
         await mcp.run_sse_async()
     elif mcp_config.transport == 'http':
         # Use localhost for display if binding to 0.0.0.0
@@ -944,7 +956,7 @@ async def run_mcp_server():
         # Configure uvicorn logging to match our format
         configure_uvicorn_logging()
 
-        await mcp.run_http_async(transport="http")
+        await mcp.run_http_async(transport='http')
     else:
         raise ValueError(
             f'Unsupported transport: {mcp_config.transport}. Use "sse", "stdio", or "http"'

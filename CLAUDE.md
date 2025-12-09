@@ -596,6 +596,16 @@ curl http://localhost:7474
 - Verify managed identity has appropriate permissions
 - Set USE_AZURE_AD=true in .env
 
+**Neo4j 5.x index creation warnings:**
+```
+Warning: Index creation race condition detected (Neo4j 5.x issue). Indexes likely already exist. Continuing...
+```
+- This is a known Neo4j 5.x issue with concurrent `CREATE INDEX ... IF NOT EXISTS` statements
+- The warning is harmless - the server continues to function normally
+- Indexes are created successfully on the first attempt; subsequent parallel attempts may trigger the warning
+- This does not affect functionality or performance
+- Related: [Neo4j Issue #13208](https://github.com/neo4j/neo4j/issues/13208), [Graphiti PR #1081](https://github.com/getzep/graphiti/pull/1081)
+
 ## Operational Utilities
 
 ### Backup and Restore

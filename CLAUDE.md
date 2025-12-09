@@ -50,12 +50,16 @@ uv run scripts/import_graph.py --input backups/backup.json --group-id my_project
    - Closure-based tool registration (no global state)
    - Supports HTTP (default) and stdio transports
    - Tool decorators with type-safe validation
+   - **Middleware stack** (`src/middleware/`):
+     - `BearerTokenAuthMiddleware`: JWT-style API key authentication
+     - `RoleBasedAuthorizationMiddleware`: Policy-based access control
    - Legacy: `src/graphiti_mcp_server.py` (preserved for backward compatibility)
 
 2. **Services Layer** (`src/services/`)
    - GraphitiService: Client lifecycle management
    - QueueService: Async episode processing with per-group_id queues
    - Factories: Runtime provider selection (LLM, Embedder, Database)
+   - AuthService: API key validation and principal extraction
 
 3. **Core Integration Layer** (Graphiti Framework)
    - Automatic entity/relationship extraction from episodes
@@ -284,6 +288,66 @@ SEMAPHORE_LIMIT=10  # Concurrent episode processing limit
 - **Knowledge graph episodes are stored in plaintext** - treat them as public data
 - **Use `.gitignore`** to protect `backups/` directory containing graph exports
 - **Verify `.gitignore`** before committing: `git check-ignore -v backups/`
+
+### Authentication & Authorization
+
+The server supports optional authentication and role-based access control (RBAC) via FastMCP middleware.
+
+**Enable/Disable Authentication:**
+```bash
+# In .env file
+GRAPHITI_AUTH_ENABLED=true  # Default: true
+
+# Configure API keys (format: sk_<env>_<random>)
+GRAPHITI_API_KEY_ADMIN=sk_prod_admin123...
+GRAPHITI_API_KEY_READONLY=sk_prod_readonly456...
+GRAPHITI_API_KEY_ANALYST=sk_prod_analyst789...
+```
+
+**Authentication Flow:**
+1. Client includes bearer token in request: `Authorization: Bearer sk_prod_admin123...`
+2. `BearerTokenAuthMiddleware` validates token and extracts principal (user_id, role)
+3. `RoleBasedAuthorizationMiddleware` checks tool access against policy file
+4. Request succeeds or returns 403 Forbidden
+
+**Security Model:**
+- `on_call_tool`: **STRICT** - Blocks execution without valid token
+- `on_list_tools`: **PERMISSIVE** - Allows discovery for `fastmcp inspect` (build step)
+- `on_initialize`: **PERMISSIVE** - Allows handshake without immediate auth
+
+**Default Roles** (defined in `config/mcp_policies.json`):
+
+| Role | Allowed Tools | Use Case |
+|------|---------------|----------|
+| `admin` | `*` (all tools) | Full administrative access |
+| `readonly` | search_nodes, search_memory_facts, get_episodes, get_entity_edge, get_status | Read-only data access |
+| `analyst` | readonly tools + add_memory | Data analysis with write capability |
+
+**Custom Policies:**
+
+Edit `config/mcp_policies.json` to create custom roles:
+
+```json
+{
+  "version": "1.0",
+  "policies": [
+    {
+      "role": "custom_role",
+      "resources": ["search_nodes", "add_memory"],
+      "description": "Custom access pattern"
+    }
+  ]
+}
+```
+
+**Disable Authentication:**
+
+```bash
+# In .env file
+GRAPHITI_AUTH_ENABLED=false
+```
+
+When disabled, all tool calls are allowed without authentication.
 
 ## Testing
 
@@ -608,6 +672,42 @@ uv run scripts/verify_meta_knowledge.py
 - **`architecture/`** - Detailed architecture documentation including component inventory, data flows, and API reference
 - **`examples/`** - MCP SDK learning tutorials (`01_connect_and_discover.py`, `02_call_tools.py`, `03_graphiti_memory.py`, `04_mcp_concepts.py`)
 - **`scripts/`** - Operational utilities for backup/restore (`export_graph.py`, `import_graph.py`, `populate_meta_knowledge.py`, `verify_meta_knowledge.py`, `check_falkordb_health.py`)
+
+### Documentation Search Tools
+
+In addition to the Graphiti knowledge graph, you have access to comprehensive documentation search via MCP:
+
+| Tool | Coverage | Use For |
+|------|----------|---------|
+| `mcp__qdrant-docs__search_docs` | 2,670 pages across 7 frameworks (Anthropic, Zep, LangChain, Prefect, FastMCP, PydanticAI, MCP Protocol) | Semantic search of official documentation |
+| `mcp__qdrant-docs__list_sources` | Lists available documentation sources | Check what documentation is available |
+| `mcp__ai-docs-server__list_doc_sources` | 13 frameworks (llms.txt format) | List available documentation sources |
+| `mcp__ai-docs-server__fetch_docs` | Fetch specific documentation pages | Retrieve individual documentation pages |
+| `mcp__Context7__resolve-library-id` | Resolve package names to library IDs | Find Context7-compatible library IDs |
+| `mcp__Context7__get-library-docs` | Up-to-date library documentation | Get current API references and code examples |
+
+**Quick examples:**
+
+```python
+# Search Anthropic documentation for prompt caching
+mcp__qdrant-docs__search_docs(
+    query="prompt caching implementation",
+    source="Anthropic",
+    k=3
+)
+
+# List available documentation sources
+mcp__qdrant-docs__list_sources()
+
+# Get up-to-date library documentation
+mcp__Context7__get-library-docs(
+    context7CompatibleLibraryID="/anthropic/anthropic-sdk-python",
+    topic="prompt caching",
+    mode="code"
+)
+```
+
+See `QUICKSTART.md` lines 216-237 and `reference/QUICK_START_QDRANT_MCP_CLIENT.md` for detailed usage guides.
 
 ### When Working with Graphiti Knowledge Graphs
 

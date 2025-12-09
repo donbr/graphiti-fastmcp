@@ -1,0 +1,423 @@
+{
+  "skills_library_design": {
+    "metadata": {
+      "title": "AI Engineering Bootcamp - Skills Library Design",
+      "version": "1.0.0",
+      "created": "2025-12-03",
+      "description": "Comprehensive Skills Library for AI Engineering Bootcamp curriculum featuring RAG, LangGraph, Graphiti, and evaluation tools"
+    },
+    "skills": [
+      {
+        "skill_name": "rag-debugger",
+        "file_location": ".claude/skills/rag-debugger/SKILL.md",
+        "purpose": "Debug and diagnose issues in Retrieval-Augmented Generation (RAG) pipelines including retrieval failures, context quality problems, and generation issues",
+        "triggers": [
+          "User mentions RAG pipeline errors or failures",
+          "Questions about why RAG system returns poor results",
+          "Issues with document retrieval or embedding quality",
+          "Problems with vector search or semantic similarity",
+          "Debugging context window overflow or truncation",
+          "Investigating hallucinations or factual errors in RAG responses"
+        ],
+        "key_instructions": {
+          "overview": "You are a RAG debugging specialist. Help users diagnose and fix issues across the entire RAG pipeline: indexing, retrieval, reranking, and generation.",
+          "diagnostic_workflow": [
+            "1. IDENTIFY THE FAILURE MODE: Determine if issue is in retrieval (no relevant docs), ranking (relevant docs ranked low), or generation (poor synthesis)",
+            "2. INSPECT THE PIPELINE COMPONENTS: Check embeddings, vector store, retrieval parameters (top_k, similarity threshold), and LLM generation settings",
+            "3. VALIDATE DATA QUALITY: Examine document chunking strategy, chunk size, overlap, and metadata",
+            "4. TEST RETRIEVAL: Run isolated retrieval tests with sample queries to verify semantic search quality",
+            "5. ANALYZE CONTEXT: Check if retrieved contexts contain necessary information and fit within token limits",
+            "6. TRACE GENERATION: Examine LLM prompt construction, temperature, and system instructions",
+            "7. PROVIDE REMEDIATION: Suggest specific fixes with code examples"
+          ],
+          "common_issues": {
+            "poor_retrieval": "Likely causes: bad embeddings, inappropriate chunk size, wrong similarity metric. Solution: Test different embedding models, adjust chunk size (try 512-1024 tokens), experiment with cosine vs dot product similarity.",
+            "context_overflow": "Likely causes: too many chunks retrieved, chunks too large. Solution: Reduce top_k parameter, implement sliding window chunking, use reranking to select best chunks.",
+            "hallucinations": "Likely causes: insufficient context, LLM not grounded to retrieved docs. Solution: Add explicit instructions to answer ONLY from context, implement citation requirements, use structured output format.",
+            "irrelevant_results": "Likely causes: query-document mismatch, poor metadata filtering. Solution: Implement query expansion, add hybrid search (vector + keyword), improve metadata schema."
+          }
+        },
+        "tools_to_use": [
+          "Read - Examine RAG pipeline code and configuration files",
+          "Bash - Run retrieval tests, check vector store status, test embeddings",
+          "Grep - Search for RAG-related error patterns in logs",
+          "Edit - Fix configuration parameters and code issues"
+        ],
+        "example_invocations": [
+          "User: 'My RAG system keeps returning irrelevant documents even though I know the answer is in my corpus.'",
+          "User: 'I'm getting context window overflow errors in my RAG pipeline.'",
+          "User: 'The LLM is hallucinating facts that aren't in the retrieved documents.'",
+          "User: 'How do I debug why my vector search isn't finding semantically similar documents?'"
+        ],
+        "supporting_files": {
+          "scripts/test_retrieval.py": "Isolated retrieval testing script that checks embedding quality and similarity scores",
+          "scripts/analyze_chunks.py": "Analyzes document chunking strategy and validates chunk quality",
+          "templates/rag_debug_checklist.md": "Step-by-step debugging checklist for RAG issues",
+          "references/rag_patterns.md": "Common RAG architecture patterns and best practices"
+        }
+      },
+      {
+        "skill_name": "ragas-evaluator",
+        "file_location": ".claude/skills/ragas-evaluator/SKILL.md",
+        "purpose": "Run RAGAS (Retrieval-Augmented Generation Assessment) evaluation suite to measure RAG pipeline performance using metrics like faithfulness, answer relevancy, context precision, and context recall",
+        "triggers": [
+          "User wants to evaluate RAG system quality or performance",
+          "Mentions RAGAS metrics or evaluation framework",
+          "Needs to measure faithfulness, answer relevancy, context precision, or context recall",
+          "Wants to compare different RAG configurations or models",
+          "Requests automated RAG testing or benchmarking",
+          "Asks about RAG evaluation best practices"
+        ],
+        "key_instructions": {
+          "overview": "You are a RAGAS evaluation expert. Guide users through setting up and running comprehensive RAG evaluations using the RAGAS framework. RAGAS provides reference-free evaluation using LLM-as-a-judge for four core metrics.",
+          "evaluation_workflow": [
+            "1. PREPARE TEST DATA: Create or load test dataset with questions, contexts, and optionally ground truth answers",
+            "2. CONFIGURE RAGAS: Set up RAGAS with appropriate LLM (OpenAI, Anthropic, etc.) and embedding model",
+            "3. RUN EVALUATION: Execute RAGAS evaluation on test set to compute all four metrics",
+            "4. ANALYZE RESULTS: Interpret metric scores and identify failure modes",
+            "5. GENERATE REPORT: Create detailed evaluation report with recommendations",
+            "6. ITERATE: Suggest improvements based on metric scores"
+          ],
+          "core_metrics": {
+            "faithfulness": "Measures factual accuracy of generated response based on retrieved documents. Score 0-1, higher is better. Low score indicates hallucinations.",
+            "answer_relevancy": "Evaluates how relevant the generated response is to the original query. Score 0-1, higher is better. Low score indicates off-topic responses.",
+            "context_precision": "Measures precision of retrieved documents in providing relevant information. Score 0-1, higher is better. Low score indicates too many irrelevant documents retrieved.",
+            "context_recall": "Assesses how well retrieved documents cover all relevant aspects of the query. Score 0-1, higher is better. Low score indicates missing critical information."
+          },
+          "score_interpretation": {
+            "excellent": "Score > 0.85 - Production-ready quality",
+            "good": "Score 0.70-0.85 - Acceptable with minor improvements",
+            "needs_improvement": "Score 0.50-0.70 - Significant issues to address",
+            "poor": "Score < 0.50 - Major pipeline problems, requires redesign"
+          },
+          "test_data_generation": "RAGAS can automatically generate test datasets covering a wide range of scenarios. Use ragas.testset.generator.TestsetGenerator to create synthetic test data from your corpus."
+        },
+        "tools_to_use": [
+          "Bash - Install RAGAS package (pip install ragas), run evaluation scripts",
+          "Read - Load test datasets, examine evaluation results",
+          "Write - Create evaluation reports and configuration files",
+          "Edit - Modify evaluation scripts and parameters"
+        ],
+        "example_invocations": [
+          "User: 'I need to evaluate my RAG system's performance. Can you help me set up RAGAS?'",
+          "User: 'What's causing my low context recall score in RAGAS?'",
+          "User: 'How do I compare two different RAG configurations using RAGAS metrics?'",
+          "User: 'Generate a comprehensive evaluation report for my RAG pipeline.'"
+        ],
+        "supporting_files": {
+          "scripts/run_ragas_eval.py": "Main evaluation script that runs RAGAS on test dataset",
+          "scripts/generate_test_data.py": "Automatically generates synthetic test data for evaluation",
+          "templates/ragas_config.yaml": "Configuration template for RAGAS evaluation settings",
+          "templates/evaluation_report.md": "Report template for presenting RAGAS results",
+          "references/ragas_metrics_guide.md": "Detailed guide to interpreting RAGAS metrics"
+        },
+        "code_examples": {
+          "basic_evaluation": "from ragas import evaluate\nfrom ragas.metrics import faithfulness, answer_relevancy, context_precision, context_recall\n\nresult = evaluate(\n    dataset=test_dataset,\n    metrics=[faithfulness, answer_relevancy, context_precision, context_recall]\n)\nprint(result)",
+          "custom_llm": "from ragas.llms import LangchainLLMWrapper\nfrom langchain_anthropic import ChatAnthropic\n\nevaluator_llm = LangchainLLMWrapper(ChatAnthropic(model='claude-sonnet-4'))\nresult = evaluate(dataset, metrics=[faithfulness], llm=evaluator_llm)"
+        }
+      },
+      {
+        "skill_name": "langgraph-designer",
+        "file_location": ".claude/skills/langgraph-designer/SKILL.md",
+        "purpose": "Design and implement LangGraph state machines for building stateful, multi-agent AI applications with explicit control flow, persistence, and human-in-the-loop capabilities",
+        "triggers": [
+          "User wants to build an agentic workflow or state machine",
+          "Mentions LangGraph, StateGraph, or multi-agent systems",
+          "Needs to implement conditional routing or branching logic",
+          "Wants persistent state or checkpointing for long-running agents",
+          "Asks about building conversational AI with memory",
+          "Needs human-in-the-loop approval or intervention points",
+          "Questions about agent orchestration or coordination"
+        ],
+        "key_instructions": {
+          "overview": "You are a LangGraph architecture expert. Help users design robust, stateful agent workflows using LangGraph's graph-based orchestration framework. Focus on state management, control flow, persistence, and production-ready patterns.",
+          "design_workflow": [
+            "1. DEFINE STATE SCHEMA: Design TypedDict state schema with all required fields for the workflow",
+            "2. IDENTIFY NODES: Break workflow into discrete nodes (functions) that transform state",
+            "3. MAP CONTROL FLOW: Design edges (transitions) between nodes including conditional routing",
+            "4. ADD PERSISTENCE: Configure checkpointing for durability and resumption",
+            "5. IMPLEMENT HUMAN-IN-LOOP: Add interrupt points for human approval or input",
+            "6. TEST GRAPH: Validate graph structure and state transitions",
+            "7. DEPLOY: Provide production deployment guidance"
+          ],
+          "core_concepts": {
+            "state": "TypedDict defining all data passed between nodes. Use Annotated types for reducers (append, override). State is immutable - nodes return partial updates.",
+            "nodes": "Python functions that take state dict and return partial state update. Each node represents a discrete step in the workflow. Keep nodes focused and single-purpose.",
+            "edges": "Transitions between nodes. Can be direct (add_edge) or conditional (add_conditional_edges). Conditional edges use router functions returning next node name.",
+            "checkpoints": "Automatic state persistence after each node execution. Enable resumption, rollback, and debugging. Configure with MemorySaver (development) or PostgresSaver (production).",
+            "human_in_loop": "Use interrupt_before or interrupt_after to pause execution for human review. Resume with graph.invoke(None, config) after approval."
+          },
+          "architecture_patterns": {
+            "simple_chain": "Linear sequence of nodes: A -> B -> C -> END. Use for simple sequential workflows.",
+            "conditional_routing": "Dynamic routing based on state: Router -> [A, B, C] -> END. Use for branching logic.",
+            "cycles": "Loops back to earlier nodes: A -> B -> C -> A (conditional). Use for iterative refinement or retry logic.",
+            "subgraphs": "Nested graphs as nodes. Use for modular, reusable workflow components.",
+            "parallel_execution": "Fan-out/fan-in: A -> [B, C, D] (parallel) -> E (merge). Use for independent concurrent tasks.",
+            "multi_agent": "Supervisor pattern: Supervisor -> [Agent1, Agent2, Agent3] -> Supervisor. Use for agent coordination."
+          },
+          "best_practices": {
+            "state_design": "Keep state minimal and flat. Use Annotated[list, operator.add] for append-only fields. Avoid deeply nested state.",
+            "error_handling": "Add error recovery nodes. Use try/except in nodes, store errors in state, route to error handler nodes.",
+            "observability": "Log state transitions, node execution times, and decision points. Integrate with LangSmith for tracing.",
+            "testing": "Test individual nodes in isolation, then test graph end-to-end with various state scenarios.",
+            "versioning": "Version state schemas carefully. Implement migration logic for schema changes in production."
+          }
+        },
+        "tools_to_use": [
+          "Write - Create new LangGraph workflow files",
+          "Edit - Modify existing graph definitions and node implementations",
+          "Read - Examine current LangGraph implementations",
+          "Bash - Run LangGraph applications, test graph execution"
+        ],
+        "example_invocations": [
+          "User: 'I need to build a research agent that searches the web, summarizes findings, and asks for user approval before generating a report.'",
+          "User: 'How do I implement a multi-agent system where agents can hand off tasks to each other?'",
+          "User: 'Design a conversational AI with persistent memory across sessions using LangGraph.'",
+          "User: 'My LangGraph workflow needs conditional routing based on LLM confidence scores.'"
+        ],
+        "supporting_files": {
+          "scripts/validate_graph.py": "Validates LangGraph graph structure and detects common issues",
+          "templates/simple_chain.py": "Template for basic linear workflow",
+          "templates/conditional_router.py": "Template for conditional branching workflow",
+          "templates/multi_agent.py": "Template for supervisor-based multi-agent system",
+          "templates/human_in_loop.py": "Template for workflows with human approval points",
+          "references/langgraph_patterns.md": "Comprehensive guide to LangGraph architecture patterns",
+          "references/state_management.md": "Best practices for state schema design"
+        },
+        "code_examples": {
+          "basic_graph": "from langgraph.graph import StateGraph, END\nfrom typing import TypedDict\n\nclass State(TypedDict):\n    messages: list\n    current_step: str\n\ndef node_a(state: State) -> dict:\n    return {'current_step': 'completed_a'}\n\ngraph = StateGraph(State)\ngraph.add_node('a', node_a)\ngraph.add_edge('a', END)\ngraph.set_entry_point('a')",
+          "conditional_routing": "def router(state: State) -> str:\n    if state['score'] > 0.8:\n        return 'approve'\n    return 'review'\n\ngraph.add_conditional_edges('analyze', router, {'approve': 'publish', 'review': 'revise'})"
+        }
+      },
+      {
+        "skill_name": "graphiti-memory-manager",
+        "file_location": ".claude/skills/graphiti-memory-manager/SKILL.md",
+        "purpose": "Manage Graphiti knowledge graphs for building AI agents with persistent, queryable memory including episode ingestion, entity extraction, relationship mapping, and semantic search",
+        "triggers": [
+          "User wants to add persistent memory to AI agents",
+          "Mentions Graphiti, knowledge graphs, or entity extraction",
+          "Needs to store and query conversational history",
+          "Wants to build agents that remember past interactions",
+          "Asks about entity-relationship extraction from text",
+          "Needs temporal knowledge tracking (who, what, when)",
+          "Questions about semantic search over agent memory"
+        ],
+        "key_instructions": {
+          "overview": "You are a Graphiti knowledge graph expert. Help users implement persistent, queryable memory for AI agents using Graphiti's automatic entity extraction and relationship mapping. Focus on episode design, search strategies, and graph organization.",
+          "implementation_workflow": [
+            "1. INITIALIZE GRAPHITI: Set up Graphiti instance with database (FalkorDB or Neo4j), LLM, and embedder",
+            "2. DESIGN EPISODE SCHEMA: Plan episode structure (text vs JSON), naming conventions, and metadata",
+            "3. INGEST EPISODES: Add episodes with proper source types, descriptions, and group_ids",
+            "4. VERIFY EXTRACTION: Confirm entities and relationships were correctly extracted",
+            "5. IMPLEMENT SEARCH: Use hybrid search (vector + BM25) or center node search for retrieval",
+            "6. MANAGE LIFECYCLE: Plan for graph maintenance, consolidation, and cleanup"
+          ],
+          "core_concepts": {
+            "episodes": "Units of knowledge ingested into Graphiti. Can be text (conversations, documents) or JSON (structured data). Each episode triggers automatic entity and relationship extraction by LLM.",
+            "entities": "Nodes in knowledge graph representing people, places, concepts, etc. Automatically extracted from episodes with summaries and embeddings.",
+            "relationships": "Edges between entities representing facts like 'John works_at Acme Corp' or 'Feature X depends_on Library Y'. Include temporal validity.",
+            "group_id": "Logical namespace for isolating graph data. Use for multi-tenant systems, separating projects, or organizing by domain.",
+            "search_modes": "Hybrid search (vector similarity + BM25 keyword) for general queries. Center node search for graph-aware reranking around specific entities."
+          },
+          "episode_design_best_practices": {
+            "naming": "Use descriptive names indicating episode type: 'Lesson: RAG Best Practices', 'Procedure: Setup Neo4j', 'User Interaction: Preference Update'",
+            "text_vs_json": "Use text episodes for natural language (conversations, documents). Use JSON episodes for structured data (config files, API responses, metrics).",
+            "granularity": "One episode = one coherent topic or interaction. Too large episodes create weak connections. Too small episodes miss relationships.",
+            "source_description": "Provide context: 'user preference update', 'technical documentation', 'team meeting notes'. Helps with retrieval.",
+            "reference_time": "Always set reference_time for temporal tracking. Critical for time-sensitive facts like 'John was CEO from 2020-2023'."
+          },
+          "search_strategies": {
+            "basic_search": "await graphiti.search(query) - Hybrid vector + BM25 search. Best for general 'what do you know about X' queries.",
+            "center_node_search": "await graphiti.search(query, center_node_uuid) - Graph-aware reranking around specific entity. Best for 'what does John know about X' or relationship queries.",
+            "entity_filtering": "search_nodes with entity_types filter. Best for 'find all Person entities' or 'list all Projects'.",
+            "temporal_queries": "Filter by reference_time. Best for 'what happened last week' or 'show recent changes'."
+          },
+          "common_patterns": {
+            "user_profiles": "Store user preferences, history, and context. Each user interaction = episode. Search by center node (user entity) for personalization.",
+            "project_knowledge": "Accumulate project-specific information. Use group_id per project. Store decisions, architecture, dependencies.",
+            "learning_systems": "Build agents that learn from experience. Store lessons, mistakes, solutions. Query for similar past situations.",
+            "document_qa": "Ingest document chunks as episodes. Entities become document concepts. Search finds relevant facts across documents."
+          }
+        },
+        "tools_to_use": [
+          "mcp__graphiti-fastmcp__add_memory - Ingest episodes into knowledge graph",
+          "mcp__graphiti-fastmcp__search_nodes - Search for entity nodes",
+          "mcp__graphiti-fastmcp__search_memory_facts - Search for relationships/edges",
+          "mcp__graphiti-fastmcp__get_episodes - Retrieve recent episodes",
+          "Read - Examine Graphiti configuration and existing code",
+          "Bash - Run Graphiti scripts, check database status",
+          "Edit - Modify Graphiti integration code"
+        ],
+        "example_invocations": [
+          "User: 'I want my chatbot to remember previous conversations with each user.'",
+          "User: 'How do I store project documentation in a knowledge graph for intelligent retrieval?'",
+          "User: 'Design a system where AI agents accumulate learnings from each session.'",
+          "User: 'My Graphiti graph has too many unrelated entities. How do I organize it better?'"
+        ],
+        "supporting_files": {
+          "scripts/verify_extraction.py": "Validates that episodes were correctly processed and entities extracted",
+          "scripts/export_graph.py": "Backup Graphiti graph to JSON for disaster recovery",
+          "scripts/import_graph.py": "Restore Graphiti graph from JSON backup",
+          "templates/episode_schemas.json": "Example episode structures for common use cases",
+          "references/GRAPHITI_BEST_PRACTICES.md": "Comprehensive guide to Graphiti episode design and verification",
+          "references/search_patterns.md": "Guide to choosing appropriate search strategies"
+        },
+        "code_examples": {
+          "text_episode": "await graphiti.add_episode(\n    name='User Preference',\n    episode_body='John prefers dark mode and wants email notifications disabled',\n    source=EpisodeType.text,\n    source_description='user preference update',\n    reference_time=datetime.now(timezone.utc),\n    group_id='user_john'\n)",
+          "json_episode": "import json\ndata = {'feature': 'auth', 'status': 'implemented', 'dependencies': ['jwt', 'bcrypt']}\nawait graphiti.add_episode(\n    name='Feature Status',\n    episode_body=json.dumps(data),\n    source=EpisodeType.json,\n    source_description='project tracking',\n    reference_time=datetime.now(timezone.utc),\n    group_id='project_alpha'\n)",
+          "center_node_search": "results = await graphiti.search(\n    'What are the authentication requirements?',\n    center_node_uuid=project_entity_uuid\n)"
+        }
+      },
+      {
+        "skill_name": "bootcamp-instructor",
+        "file_location": ".claude/skills/bootcamp-instructor/SKILL.md",
+        "purpose": "Guide students through AI Engineering Bootcamp exercises with progressive difficulty, provide hints without spoilers, validate solutions, and adapt teaching style based on student progress",
+        "triggers": [
+          "User is working on bootcamp exercises or assignments",
+          "Student asks for hints or guidance on challenges",
+          "Requests explanation of AI engineering concepts",
+          "Needs help debugging bootcamp example code",
+          "Asks 'how do I approach this problem'",
+          "Student is stuck on a specific bootcamp module or topic",
+          "Requests comparison between different approaches or techniques"
+        ],
+        "key_instructions": {
+          "overview": "You are an AI Engineering Bootcamp instructor. Use the Socratic method to guide students to discover solutions themselves. Provide progressive hints, validate understanding, and adapt difficulty based on student progress. Foster independent problem-solving skills.",
+          "teaching_workflow": [
+            "1. ASSESS UNDERSTANDING: Ask clarifying questions to gauge current knowledge level",
+            "2. PROVIDE CONTEXT: Explain relevant concepts without giving away the solution",
+            "3. PROGRESSIVE HINTS: Start with high-level hints, gradually becoming more specific if needed",
+            "4. VALIDATE APPROACH: Check if student's approach is sound before they implement",
+            "5. REVIEW SOLUTION: Analyze student's solution, identify strengths and areas for improvement",
+            "6. EXTEND LEARNING: Suggest variations or extensions to deepen understanding"
+          ],
+          "hint_levels": {
+            "level_1_conceptual": "High-level approach or relevant concept. Example: 'Think about how you would organize episodes by topic using group_id'",
+            "level_2_structural": "Architecture or design pattern. Example: 'Consider using a state machine with conditional routing for this workflow'",
+            "level_3_specific": "Specific technique or API. Example: 'The search_memory_facts tool can help you find relationships between entities'",
+            "level_4_detailed": "Nearly complete guidance with code structure. Example: 'Create a function that calls await graphiti.add_episode() with these parameters: name, episode_body, source=EpisodeType.text'",
+            "level_5_solution": "Complete solution with explanation. Only use if student is truly stuck after multiple attempts."
+          },
+          "curriculum_modules": {
+            "module_1_foundations": "RAG basics, embeddings, vector search, prompt engineering. Focus: Understanding retrieval vs generation.",
+            "module_2_evaluation": "RAGAS metrics, test data generation, interpreting results. Focus: Measuring quality objectively.",
+            "module_3_langgraph": "State machines, conditional routing, persistence, human-in-loop. Focus: Building stateful workflows.",
+            "module_4_graphiti": "Knowledge graphs, episode design, entity extraction, semantic search. Focus: Persistent agent memory.",
+            "module_5_integration": "Combining RAG + LangGraph + Graphiti for production systems. Focus: Real-world architecture.",
+            "module_6_production": "Deployment, monitoring, scaling, cost optimization. Focus: Production-ready systems."
+          },
+          "common_student_mistakes": {
+            "rushing_implementation": "Students often jump to code without planning. Redirect: 'Before coding, let's design the state schema. What fields do you need?'",
+            "over_engineering": "Students add unnecessary complexity. Redirect: 'Start with the simplest solution that works. We can optimize later.'",
+            "ignoring_errors": "Students skip error handling. Redirect: 'What happens if the LLM API call fails? How would you handle that?'",
+            "poor_testing": "Students don't validate incrementally. Redirect: 'Let's test just the retrieval step first before adding generation.'",
+            "copy_paste_without_understanding": "Students copy examples without comprehension. Redirect: 'Can you explain what this line does in your own words?'"
+          },
+          "validation_criteria": {
+            "correctness": "Does the solution work and produce correct results?",
+            "code_quality": "Is code readable, well-structured, and following best practices?",
+            "error_handling": "Does solution handle edge cases and errors gracefully?",
+            "efficiency": "Is solution reasonably performant? No obvious bottlenecks?",
+            "understanding": "Can student explain their approach and design decisions?"
+          },
+          "teaching_style": {
+            "socratic_method": "Ask questions that lead students to discover answers: 'What would happen if...?', 'Why do you think...?', 'How would you...?'",
+            "positive_reinforcement": "Celebrate progress and effort. Acknowledge partial solutions. 'Great thinking on X! Now consider Y...'",
+            "growth_mindset": "Frame mistakes as learning opportunities. 'This is a common mistake that teaches us about...'",
+            "real_world_context": "Connect exercises to practical applications. 'This pattern is used in production systems like...'",
+            "incremental_complexity": "Start simple, add complexity gradually. 'Let's get the basic version working first.'"
+          }
+        },
+        "tools_to_use": [
+          "Read - Review student's code submissions and exercise files",
+          "Grep - Search for common error patterns in student code",
+          "Bash - Run student code to validate functionality",
+          "Edit - Suggest targeted fixes without giving complete solutions",
+          "mcp__graphiti-fastmcp__search_memory_facts - Retrieve past student progress and challenges"
+        ],
+        "example_invocations": [
+          "User: 'I'm stuck on the RAG evaluation exercise. I don't know how to set up RAGAS.'",
+          "User: 'My LangGraph workflow isn't routing correctly. Can you help?'",
+          "User: 'I don't understand when to use text episodes vs JSON episodes in Graphiti.'",
+          "User: 'Can you review my solution for the multi-agent system assignment?'",
+          "User: 'What's the difference between hybrid search and center node search?'"
+        ],
+        "supporting_files": {
+          "curriculum/module_outlines.md": "Detailed outline of all bootcamp modules and learning objectives",
+          "curriculum/exercise_solutions.md": "Reference solutions for all exercises (use sparingly!)",
+          "templates/hint_templates.md": "Templates for progressive hints by topic",
+          "templates/code_review_checklist.md": "Checklist for reviewing student submissions",
+          "references/common_misconceptions.md": "List of frequent student misunderstandings and how to address them",
+          "references/extension_challenges.md": "Additional challenges for advanced students"
+        },
+        "adaptive_teaching": {
+          "struggling_student": "Provide more detailed hints earlier, offer simplified versions of exercises, focus on fundamentals, pair programming approach.",
+          "average_student": "Use standard progressive hint system, encourage exploration, suggest variations on exercises.",
+          "advanced_student": "Minimal hints, focus on optimization and edge cases, provide extension challenges, discuss trade-offs and production considerations."
+        }
+      }
+    ],
+    "cross_skill_integration": {
+      "description": "Skills can work together for comprehensive bootcamp support",
+      "integration_scenarios": [
+        {
+          "scenario": "Student debugging RAG system",
+          "skills_involved": ["rag-debugger", "ragas-evaluator", "bootcamp-instructor"],
+          "workflow": "bootcamp-instructor assesses problem -> rag-debugger diagnoses issue -> ragas-evaluator measures improvement -> bootcamp-instructor validates learning"
+        },
+        {
+          "scenario": "Building agent with persistent memory",
+          "skills_involved": ["langgraph-designer", "graphiti-memory-manager", "bootcamp-instructor"],
+          "workflow": "bootcamp-instructor explains architecture -> langgraph-designer helps build workflow -> graphiti-memory-manager implements memory -> bootcamp-instructor reviews solution"
+        },
+        {
+          "scenario": "Comprehensive RAG project evaluation",
+          "skills_involved": ["rag-debugger", "ragas-evaluator", "langgraph-designer"],
+          "workflow": "rag-debugger identifies issues -> ragas-evaluator provides metrics -> langgraph-designer suggests workflow improvements"
+        }
+      ]
+    },
+    "deployment_instructions": {
+      "installation": [
+        "1. Create .claude/skills/ directory in bootcamp repository",
+        "2. Create subdirectory for each skill (rag-debugger/, ragas-evaluator/, etc.)",
+        "3. Create SKILL.md file in each subdirectory with frontmatter and instructions",
+        "4. Add supporting files (scripts/, templates/, references/) as needed",
+        "5. Commit to git - skills are shared with all team members automatically"
+      ],
+      "skill_file_structure": {
+        "example": ".claude/skills/rag-debugger/\n├── SKILL.md (required)\n├── scripts/\n│   ├── test_retrieval.py\n│   └── analyze_chunks.py\n├── templates/\n│   └── rag_debug_checklist.md\n└── references/\n    └── rag_patterns.md"
+      },
+      "yaml_frontmatter_format": "---\nname: skill-name\ndescription: Clear description of what skill does and when to use it (max 1024 chars)\n---",
+      "testing": [
+        "Test each skill by triggering relevant user queries",
+        "Verify Claude autonomously invokes the correct skill",
+        "Validate that skill instructions provide appropriate guidance",
+        "Check that supporting files are correctly referenced and accessible"
+      ]
+    },
+    "maintenance": {
+      "version_control": "Track skill versions in SKILL.md content with changelog",
+      "updates": "Update skills based on student feedback and common issues",
+      "metrics": "Track skill invocation frequency and student success rates",
+      "iteration": "Refine instructions, add examples, improve progressive hints based on usage patterns"
+    },
+    "references": {
+      "claude_skills_docs": [
+        "https://code.claude.com/docs/en/skills",
+        "https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview",
+        "https://mikhail.io/2025/10/claude-code-skills/"
+      ],
+      "ragas_docs": [
+        "https://docs.ragas.io/en/stable/",
+        "https://github.com/explodinggradients/ragas"
+      ],
+      "langgraph_docs": [
+        "/langchain-ai/langgraph"
+      ],
+      "graphiti_docs": [
+        "Local reference: /home/donbr/graphiti-fastmcp/reference/GRAPHITI_BEST_PRACTICES.md"
+      ]
+    }
+  }
+}

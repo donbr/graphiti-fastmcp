@@ -111,6 +111,28 @@ uv sync --extra dev
 uv add package-name
 ```
 
+### Git Workflow
+
+**CRITICAL: Always create feature branches BEFORE making any commits**
+
+```bash
+# CORRECT workflow - create branch first
+git checkout main
+git pull origin main
+git checkout -b feature/your-feature-name
+# Now make changes, commit, push, create PR
+
+# INCORRECT - never commit directly to main
+# This creates diverged history and requires cleanup
+```
+
+**Key rules:**
+- ✅ Create feature branch FIRST, before any commits
+- ✅ All work happens on feature branches
+- ✅ Main only receives changes via merged PRs
+- ❌ Never commit directly to main branch
+- ❌ Never make commits before creating feature branch
+
 ### Database Setup
 
 **FalkorDB (Default - Combined Container):**

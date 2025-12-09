@@ -30,7 +30,7 @@ import json
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamablehttp_client
 
-SERVER_URL = "http://localhost:8000/mcp/"
+SERVER_URL = "https://graphiti-fastmcp.fastmcp.app/mcp"
 
 
 def parse_response(result) -> dict | str:

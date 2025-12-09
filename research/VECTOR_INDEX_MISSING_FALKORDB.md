@@ -7,7 +7,48 @@
 | **Affected Version** | 0.24.1 (and likely all versions with FalkorDB support) |
 | **Maintainer** | Zep Software, Inc. |
 | **Date** | 2025-12-09 |
-| **Status** | Two bugs identified - see details below |
+| **Updated** | 2025-12-09 |
+| **Status** | ⚠️ **CORRECTED** - See important update below |
+
+---
+
+## ⚠️ IMPORTANT CORRECTION (2025-12-09)
+
+**Bug 2 ("Vector parameter type mismatch") was NOT an upstream bug in graphiti-core.**
+
+The error `Type mismatch: expected Null or Vectorf32 but was List` was caused by **corrupted data in FalkorDB Cloud** resulting from a flawed local migration script (`scripts/migrate_simple.py`).
+
+### What Happened
+
+1. A custom migration script was written to copy graph data between FalkorDB graphs
+2. The script used raw Cypher queries and incorrectly serialized `Vectorf32` embeddings as Python lists
+3. This corrupted the embedding storage type from `Vectorf32` to `List`
+4. Vector searches then failed because the stored embeddings had the wrong type
+
+### The Flawed Script (now deleted)
+
+```python
+# scripts/migrate_simple.py - THE BUG
+for k, v in props.items():
+    # ...
+    else:
+        parts.append(f'{k}: {v}')  # <-- Converts Vectorf32 to Python list string!
+```
+
+When `v` is a `Vectorf32` embedding, this converts it to a string representation of a Python list, which FalkorDB stores as `List` type instead of `Vectorf32`.
+
+### Resolution
+
+- **Upstream issue #1100** was closed as "not a bug" - the error was self-inflicted
+- The migration script has been deleted from version control
+- Affected graphs need to be cleared and re-imported using Graphiti's API (`add_episode`/`add_memory`)
+- See GitHub issue #14 for the re-import plan
+
+### Lesson Learned
+
+**Never use raw Cypher scripts to migrate Graphiti data.** Always use:
+- `scripts/export_graph.py` → exports episodes to JSON
+- `scripts/import_graph.py` → re-imports via `add_memory` MCP tool (regenerates embeddings correctly)
 
 ---
 
@@ -16,7 +57,7 @@
 | # | Bug | Location | Status |
 |---|-----|----------|--------|
 | 1 | Missing vector index creation | `falkordb_driver.py:245-250` | Root cause identified |
-| 2 | Vector parameter type mismatch | `graph_queries.py:145` | Root cause identified |
+| 2 | ~~Vector parameter type mismatch~~ | ~~`graph_queries.py:145`~~ | **NOT A BUG** - self-inflicted data corruption |
 
 ---
 
@@ -345,7 +386,9 @@ Look for `VECTOR` type on `name_embedding` and `fact_embedding`.
 
 # Bug 2: Vector Parameter Type Mismatch
 
-## Problem Summary
+> ⚠️ **CORRECTION**: This section documents what was *believed* to be an upstream bug, but was actually caused by **corrupted data from `scripts/migrate_simple.py`**. The upstream issue #1100 has been closed. See the "Important Correction" section at the top of this document for details.
+
+## Problem Summary (OUTDATED - kept for historical reference)
 
 When executing vector similarity searches, the FalkorDB driver throws:
 ```

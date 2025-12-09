@@ -1,12 +1,40 @@
 #!/usr/bin/env python3
 """
-Validate Qdrant collection and test semantic search functionality.
+Validate Qdrant Documentation Collection for MCP Research Tools.
 
-This script:
-1. Verifies collection exists and has correct configuration
-2. Counts total documents and documents per source
-3. Tests semantic search with sample queries
-4. Validates metadata structure
+This script validates the Qdrant MCP documentation server that powers
+semantic search across AI/ML framework documentation. It's an essential
+research tool for verifying the documentation search infrastructure.
+
+**Collection**: llms-full-silver (2,670 pages total)
+
+**Documentation Sources**:
+- Anthropic Claude (932 pages) - Claude API, prompt engineering, safety
+- LangChain (506 pages) - RAG, agents, chains, memory
+- Prefect (767 pages) - Workflow orchestration, deployments
+- FastMCP (175 pages) - MCP server development
+- MCP Protocol (44 pages) - Model Context Protocol specification
+- PydanticAI (127 pages) - Type-safe AI agents
+- Zep Graphiti (119 pages) - Temporal knowledge graphs, memory
+
+**Usage**:
+    uv run scripts/validate_qdrant.py
+
+**What it validates**:
+1. Collection exists with correct configuration (1536 dimensions, cosine)
+2. Document counts match expected totals per source
+3. Metadata structure is consistent
+4. Semantic search returns relevant results
+5. Filtered search by source works correctly
+
+**Environment Variables Required**:
+- QDRANT_API_URL: Qdrant Cloud endpoint
+- QDRANT_API_KEY: Qdrant API key
+- OPENAI_API_KEY: For embedding generation
+
+**See Also**:
+- mcp__qdrant-docs__search_docs - MCP tool for searching this collection
+- mcp__qdrant-docs__list_sources - List available documentation sources
 """
 
 import os

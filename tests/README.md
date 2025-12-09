@@ -10,7 +10,8 @@ The test suite is designed to thoroughly test all aspects of the Graphiti MCP se
 
 ### Core Test Modules
 
-- **`test_comprehensive_integration.py`** - Main integration test suite covering all MCP tools
+- **`test_inmemory_example.py`** - **Recommended** in-memory tests using FastMCP Client (fast, reliable)
+- **`test_comprehensive_integration.py`** - Integration test suite using subprocess (slower, may have env issues)
 - **`test_async_operations.py`** - Tests for concurrent operations and async patterns
 - **`test_stress_load.py`** - Stress testing and load testing scenarios
 - **`test_fixtures.py`** - Shared fixtures and test utilities
@@ -40,10 +41,23 @@ uv add mcp
 
 ## Running Tests
 
-### Quick Start
+### Quick Start (Recommended)
+
+The fastest and most reliable way to test is using the in-memory tests:
 
 ```bash
-# Run smoke tests (quick validation)
+# Run in-memory tests (fast, ~1 second)
+uv run pytest tests/test_inmemory_example.py -v -s
+```
+
+This uses FastMCP's recommended testing pattern with in-memory transport, avoiding subprocess issues.
+
+### Alternative: Subprocess-based Tests
+
+The original test runner spawns subprocess servers. These tests may experience environment variable issues:
+
+```bash
+# Run smoke tests (may timeout due to subprocess issues)
 python tests/run_tests.py smoke
 
 # Run integration tests with mock LLM
@@ -52,6 +66,8 @@ python tests/run_tests.py integration --mock-llm
 # Run all tests
 python tests/run_tests.py all
 ```
+
+> **Note**: The subprocess-based tests use `StdioServerParameters` which can have environment variable isolation issues. If you encounter `ValueError: invalid literal for int()` errors related to `SEMAPHORE_LIMIT` or `MAX_REFLEXION_ITERATIONS`, use the in-memory tests instead.
 
 ### Test Runner Options
 
@@ -236,6 +252,65 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
+
+## In-Memory Testing Pattern (Recommended)
+
+The `test_inmemory_example.py` file demonstrates FastMCP's recommended testing approach:
+
+```python
+import os
+import sys
+from pathlib import Path
+
+import pytest
+from fastmcp.client import Client
+
+# Set env vars BEFORE importing graphiti modules
+def set_env_if_empty(key: str, value: str):
+    if not os.environ.get(key):
+        os.environ[key] = value
+
+set_env_if_empty('SEMAPHORE_LIMIT', '10')
+set_env_if_empty('MAX_REFLEXION_ITERATIONS', '0')
+set_env_if_empty('FALKORDB_URI', 'redis://localhost:6379')
+
+# Import after env vars are set
+from graphiti_mcp_server import mcp
+
+@pytest.fixture
+async def mcp_client():
+    """In-memory MCP client - no subprocess needed."""
+    async with Client(transport=mcp) as client:
+        yield client
+
+async def test_list_tools(mcp_client: Client):
+    tools = await mcp_client.list_tools()
+    assert len(tools) > 0
+```
+
+### Benefits of In-Memory Testing
+
+| Aspect | In-Memory | Subprocess |
+|--------|-----------|------------|
+| Speed | ~1 second | 10+ minutes |
+| Reliability | High (no env issues) | Low (env var isolation) |
+| Setup | Direct import | Server spawn |
+| Debugging | Easy (same process) | Hard (separate process) |
+| CI/CD | Fast feedback | Slow feedback |
+
+### When to Use Each Approach
+
+**In-Memory Tests** (recommended for development):
+- Rapid development feedback
+- Tool schema validation
+- Basic functionality tests
+- Pre-commit checks
+
+**Subprocess Tests** (for comprehensive validation):
+- Full end-to-end integration
+- Transport-specific testing
+- Production-like scenarios
+- Pre-release validation
 
 ## Troubleshooting
 

@@ -121,8 +121,13 @@ GRAPHITI_MCP_INSTRUCTIONS = """
 Graphiti is a memory service for AI agents built on a knowledge graph. Graphiti performs well
 with dynamic data such as user interactions, changing enterprise data, and external information.
 
-Graphiti transforms information into a richly connected knowledge network. The system organizes data as episodes 
-(content snippets), nodes (entities), and facts (relationships between entities).
+Graphiti transforms information into a richly connected knowledge network, allowing you to
+capture relationships between concepts, entities, and information. The system organizes data as episodes
+(content snippets), nodes (entities), and facts (relationships between entities), creating a dynamic,
+queryable memory store that evolves with new information.
+
+Facts contain temporal metadata, allowing you to track the time of creation and whether a fact is invalid
+(superseded by new information).
 
 Key capabilities:
 1. Add episodes (text, messages, or JSON) to the knowledge graph with the add_memory tool
@@ -130,6 +135,15 @@ Key capabilities:
 3. Find relevant facts (relationships between entities) with search_facts
 4. Retrieve specific entity edges or episodes by UUID
 5. Manage the knowledge graph with tools like delete_episode, delete_entity_edge, and clear_graph
+
+The server connects to a database for persistent storage and uses language models for certain operations.
+Each piece of information is organized by group_id, allowing you to maintain separate knowledge domains.
+
+When adding information, provide descriptive names and detailed content to improve search quality.
+When searching, use specific queries and consider filtering by group_id for more relevant results.
+
+For optimal performance, ensure the database is properly configured and accessible, and valid
+API keys are provided for any language model operations.
 """
 
 # ------------------------------------------------------------------------------
@@ -313,7 +327,44 @@ def _register_tools(
         source_description: str = '',
         uuid: str | None = None,
     ) -> SuccessResponse | ErrorResponse:
-        """Add an episode to memory."""
+        """Add an episode to memory. This is the primary way to add information to the graph.
+
+        This function returns immediately and processes the episode addition in the background.
+        Episodes for the same group_id are processed sequentially to avoid race conditions.
+
+        Args:
+            name (str): Name of the episode
+            episode_body (str): The content of the episode to persist to memory. When source='json', this must be a
+                               properly escaped JSON string, not a raw Python dictionary. The JSON data will be
+                               automatically processed to extract entities and relationships.
+            group_id (str, optional): A unique ID for this graph. If not provided, uses the default group_id from CLI
+                                     or a generated one.
+            source (str, optional): Source type, must be one of:
+                                   - 'text': For plain text content (default)
+                                   - 'json': For structured data
+                                   - 'message': For conversation-style content
+            source_description (str, optional): Description of the source
+            uuid (str, optional): Optional UUID for the episode
+
+        Examples:
+            # Adding plain text content
+            add_memory(
+                name="Company News",
+                episode_body="Acme Corp announced a new product line today.",
+                source="text",
+                source_description="news article",
+                group_id="some_arbitrary_string"
+            )
+
+            # Adding structured JSON data
+            # NOTE: episode_body should be a JSON string (standard JSON escaping)
+            add_memory(
+                name="Customer Profile",
+                episode_body='{"company": {"name": "Acme Technologies"}, "products": [{"id": "P001", "name": "CloudSync"}, {"id": "P002", "name": "DataMiner"}]}',
+                source="json",
+                source_description="CRM data"
+            )
+        """
         try:
             effective_group_id = group_id or cfg.graphiti.group_id
 
@@ -349,7 +400,14 @@ def _register_tools(
         max_nodes: int = 10,
         entity_types: list[str] | None = None,
     ) -> NodeSearchResponse | ErrorResponse:
-        """Search for nodes in the graph memory."""
+        """Search for nodes in the graph memory.
+
+        Args:
+            query (str): The search query
+            group_ids (list[str], optional): Optional list of group IDs to filter results
+            max_nodes (int): Maximum number of nodes to return (default: 10)
+            entity_types (list[str], optional): Optional list of entity type names to filter by
+        """
         try:
             client = await graphiti_svc.get_client()
             effective_group_ids = (
@@ -403,7 +461,14 @@ def _register_tools(
         max_facts: int = 10,
         center_node_uuid: str | None = None,
     ) -> FactSearchResponse | ErrorResponse:
-        """Search the graph memory for relevant facts."""
+        """Search the graph memory for relevant facts.
+
+        Args:
+            query (str): The search query
+            group_ids (list[str], optional): Optional list of group IDs to filter results
+            max_facts (int): Maximum number of facts to return (default: 10)
+            center_node_uuid (str, optional): Optional UUID of a node to center the search around
+        """
         try:
             if max_facts <= 0:
                 return ErrorResponse(error='max_facts must be a positive integer')
@@ -435,7 +500,11 @@ def _register_tools(
 
     @server.tool()
     async def delete_entity_edge(uuid: str) -> SuccessResponse | ErrorResponse:
-        """Delete an entity edge from the graph memory."""
+        """Delete an entity edge from the graph memory.
+
+        Args:
+            uuid (str): UUID of the entity edge to delete
+        """
         try:
             client = await graphiti_svc.get_client()
             entity_edge = await EntityEdge.get_by_uuid(client.driver, uuid)
@@ -447,7 +516,11 @@ def _register_tools(
 
     @server.tool()
     async def delete_episode(uuid: str) -> SuccessResponse | ErrorResponse:
-        """Delete an episode from the graph memory."""
+        """Delete an episode from the graph memory.
+
+        Args:
+            uuid (str): UUID of the episode to delete
+        """
         try:
             client = await graphiti_svc.get_client()
             episodic_node = await EpisodicNode.get_by_uuid(client.driver, uuid)
@@ -459,7 +532,11 @@ def _register_tools(
 
     @server.tool()
     async def get_entity_edge(uuid: str) -> dict[str, Any] | ErrorResponse:
-        """Get an entity edge from the graph memory by its UUID."""
+        """Get an entity edge from the graph memory by its UUID.
+
+        Args:
+            uuid (str): UUID of the entity edge to retrieve
+        """
         try:
             client = await graphiti_svc.get_client()
             entity_edge = await EntityEdge.get_by_uuid(client.driver, uuid)
@@ -473,7 +550,12 @@ def _register_tools(
         group_ids: list[str] | None = None,
         max_episodes: int = 10,
     ) -> EpisodeSearchResponse | ErrorResponse:
-        """Get episodes from the graph memory."""
+        """Get episodes from the graph memory.
+
+        Args:
+            group_ids (list[str], optional): Optional list of group IDs to filter results
+            max_episodes (int): Maximum number of episodes to return (default: 10)
+        """
         try:
             client = await graphiti_svc.get_client()
             effective_group_ids = (
@@ -518,7 +600,11 @@ def _register_tools(
 
     @server.tool()
     async def clear_graph(group_ids: list[str] | None = None) -> SuccessResponse | ErrorResponse:
-        """Clear all data from the graph for specified group IDs."""
+        """Clear all data from the graph for specified group IDs.
+
+        Args:
+            group_ids (list[str], optional): Optional list of group IDs to clear. If not provided, clears the default group.
+        """
         try:
             client = await graphiti_svc.get_client()
             effective_group_ids = (
@@ -538,7 +624,10 @@ def _register_tools(
 
     @server.tool()
     async def get_status() -> StatusResponse:
-        """Get the status of the Graphiti MCP server and database connection."""
+        """Get the status of the Graphiti MCP server and database connection.
+
+        Returns information about server health and database connectivity.
+        """
         try:
             client = await graphiti_svc.get_client()
             # Test database connection

@@ -587,6 +587,30 @@ curl http://localhost:7474
 # Verify credentials match NEO4J_PASSWORD in .env
 ```
 
+**Neo4j Aura "defunct connection" errors:**
+```
+Failed to read from defunct connection IPv4Address(...)
+failed to obtain a connection from the pool within 60.0s (timeout)
+```
+
+This occurs because Neo4j Aura terminates idle connections after ~5 minutes, but the default neo4j driver uses a 1-hour connection lifetime.
+
+**Solution:** This repo includes a fix via `Neo4jDriverWithPoolConfig` in `src/server.py` that sets `max_connection_lifetime=300` (5 minutes). The fix is applied automatically when using Neo4j.
+
+You can also configure pool settings via environment variables or config file:
+```yaml
+# In config/config.yaml
+database:
+  provider: neo4j
+  providers:
+    neo4j:
+      max_connection_lifetime: 300  # seconds (default: 300)
+      max_connection_pool_size: 50  # connections (default: 50)
+      connection_acquisition_timeout: 60.0  # seconds (default: 60.0)
+```
+
+See [Issue #17](https://github.com/donbr/graphiti-fastmcp/issues/17) for details.
+
 **Import errors for optional providers:**
 - Install providers extra: `uv sync --extra providers`
 - This includes: Anthropic, Gemini, Groq, Voyage, Sentence Transformers

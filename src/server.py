@@ -15,10 +15,12 @@ import fastmcp
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from graphiti_core import Graphiti
+from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.edges import EntityEdge
 from graphiti_core.nodes import EpisodeType, EpisodicNode
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
+from neo4j import AsyncGraphDatabase
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -64,6 +66,55 @@ logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
 logging.getLogger('mcp.server.streamable_http_manager').setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+# ------------------------------------------------------------------------------
+# Custom Neo4j Driver with Connection Pool Configuration
+# ------------------------------------------------------------------------------
+
+
+class Neo4jDriverWithPoolConfig(Neo4jDriver):
+    """Neo4j driver with configurable connection pool settings.
+
+    This is a workaround for graphiti-core not exposing connection pool parameters.
+    Required for Neo4j Aura and other cloud providers that terminate idle connections.
+
+    See: https://github.com/donbr/graphiti-fastmcp/issues/17
+    """
+
+    def __init__(
+        self,
+        uri: str,
+        user: str | None,
+        password: str | None,
+        database: str = 'neo4j',
+        max_connection_lifetime: int = 300,
+        max_connection_pool_size: int = 50,
+        connection_acquisition_timeout: float = 60.0,
+    ):
+        # Skip parent __init__ to avoid creating driver with default settings
+        # Call grandparent __init__ instead
+        from graphiti_core.driver.driver import GraphDriver
+
+        GraphDriver.__init__(self)
+
+        # Create driver with pool configuration
+        self.client = AsyncGraphDatabase.driver(
+            uri=uri,
+            auth=(user or '', password or ''),
+            max_connection_lifetime=max_connection_lifetime,
+            max_connection_pool_size=max_connection_pool_size,
+            connection_acquisition_timeout=connection_acquisition_timeout,
+        )
+        self._database = database
+        self.aoss_client = None
+
+        logger.info(
+            f'Created Neo4j driver with pool config: '
+            f'max_lifetime={max_connection_lifetime}s, '
+            f'pool_size={max_connection_pool_size}, '
+            f'acquisition_timeout={connection_acquisition_timeout}s'
+        )
+
 
 # MCP server instructions
 GRAPHITI_MCP_INSTRUCTIONS = """
@@ -145,10 +196,21 @@ class GraphitiService:
                     max_coroutines=self.semaphore_limit,
                 )
             else:
-                self.client = Graphiti(
+                # Use custom Neo4j driver with connection pool configuration
+                # This prevents "defunct connection" errors with Neo4j Aura
+                neo4j_driver = Neo4jDriverWithPoolConfig(
                     uri=db_config['uri'],
                     user=db_config['user'],
                     password=db_config['password'],
+                    database=db_config.get('database', 'neo4j'),
+                    max_connection_lifetime=db_config.get('max_connection_lifetime', 300),
+                    max_connection_pool_size=db_config.get('max_connection_pool_size', 50),
+                    connection_acquisition_timeout=db_config.get(
+                        'connection_acquisition_timeout', 60.0
+                    ),
+                )
+                self.client = Graphiti(
+                    graph_driver=neo4j_driver,
                     llm_client=llm_client,
                     embedder=embedder_client,
                     max_coroutines=self.semaphore_limit,

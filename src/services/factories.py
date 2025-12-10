@@ -395,8 +395,12 @@ class DatabaseDriverFactory:
                     'uri': uri,
                     'user': username,
                     'password': password,
-                    # Note: database and use_parallel_runtime would need to be passed
-                    # to the driver after initialization if supported
+                    'database': neo4j_config.database,
+                    # Connection pool settings to prevent "defunct connection" errors
+                    # with Neo4j Aura and other cloud providers
+                    'max_connection_lifetime': neo4j_config.max_connection_lifetime,
+                    'max_connection_pool_size': neo4j_config.max_connection_pool_size,
+                    'connection_acquisition_timeout': neo4j_config.connection_acquisition_timeout,
                 }
 
             case 'falkordb':

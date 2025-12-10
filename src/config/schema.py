@@ -182,6 +182,18 @@ class Neo4jProviderConfig(BaseModel):
     password: str | None = None
     database: str = 'neo4j'
     use_parallel_runtime: bool = False
+    # Connection pool settings to prevent "defunct connection" errors with Neo4j Aura
+    # See: https://github.com/neo4j/neo4j-python-driver/issues/316
+    max_connection_lifetime: int = Field(
+        default=300,
+        description='Max connection lifetime in seconds. Set lower than cloud provider idle timeout (default 5 min for Aura)',
+    )
+    max_connection_pool_size: int = Field(
+        default=50, description='Maximum number of connections in the pool'
+    )
+    connection_acquisition_timeout: float = Field(
+        default=60.0, description='Timeout in seconds for acquiring a connection from pool'
+    )
 
 
 class FalkorDBProviderConfig(BaseModel):

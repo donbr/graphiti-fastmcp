@@ -39,6 +39,13 @@ pending_episodes/*.json  # Queue for episodes waiting to be imported (may contai
 # scripts/populate_meta_knowledge.py
 
 scratchpad.md
+
+# Migration progress and logs (may contain sensitive data)
+migration/progress/*.json
+migration/logs/*.log
+!migration/progress/.gitkeep
+!migration/logs/.gitkeep
+
 pending_episodes/2025-11-29_qdrant_docs_procedure.json
 pending_episodes/2025-11-29_qdrant_docs_antipattern.json
 pending_episodes/2025-11-29_qdrant_docs_best_practice.json

@@ -1,7 +1,46 @@
 # Active Tasks
 
-**Last Updated:** 2025-12-11
-**Current Phase:** Implementation
+**Last Updated:** 2025-12-12
+**Current Phase:** Migration Implementation
+
+---
+
+## Current Work: Neo4j Memory → Graphiti Migration
+
+### Branch: `feature/neo4j-to-graphiti-migration`
+
+Multi-agent migration system using Claude Agent SDK:
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Agent definitions (4) | ✅ Complete | `migration/agents/*.json` |
+| Orchestration script | ✅ Complete | `migration/orchestrate_migration.py` |
+| Migration Skill | ✅ Complete | `migration/skills/SKILL.md` |
+| Progress tracking | ✅ Complete | `migration/progress/` |
+| Documentation | ✅ Complete | `migration/README.md` |
+
+### Run Commands
+
+```bash
+# Dry run (see what would happen)
+uv run python migration/orchestrate_migration.py --dry-run
+
+# Execute migration
+uv run python migration/orchestrate_migration.py
+
+# Resume from checkpoint
+uv run python migration/orchestrate_migration.py --resume
+```
+
+### Migration Phases
+
+| Phase | group_id | Priority | Status |
+|-------|----------|----------|--------|
+| 1 | don_branson_career | CRITICAL | Pending |
+| 2 | disney_knowledge | HIGH | Pending |
+| 3 | career_opportunities | MEDIUM | Pending |
+| 4 | technical_patterns | MEDIUM | Pending |
+| 5 | ai_engineering_research | LOW | Pending |
 
 ---
 
@@ -32,8 +71,8 @@
 ### Phase 1: Safe Documentation Structure
 - [x] Create docs/ directory and move QUICKSTART.md
 - [x] Create docs/TASKS.md (this file)
-- [ ] Create docs/TROUBLESHOOTING.md with calm decision tree
-- [ ] Create .claude/commands/verify.md slash command
+- [x] Create docs/TROUBLESHOOTING.md with calm decision tree
+- [x] Create .claude/commands/verify.md slash command
 - [ ] Update CLAUDE.md to be a router (minimal, stable references only)
 
 ### Phase 2: Remove Landmines from QUICKSTART.md

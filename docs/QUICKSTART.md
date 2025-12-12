@@ -1,50 +1,113 @@
 # Graphiti MCP Quick Start
 
-**For New Claude Code Sessions**: The knowledge graph is self-documenting. Run this single query to get started:
+**For New Claude Code Sessions**: Follow these three steps to connect to the knowledge graph:
 
 ```python
-# Get the "Start Here" entry point that explains everything
+# Step 1: Verify connection
+mcp__graphiti-local__get_status()
+# ✅ Expected: {"status":"ok","message":"Graphiti MCP server is running..."}
+
+# Step 2: List available knowledge (MUST specify group_ids)
 mcp__graphiti-local__get_episodes(
-    group_ids=["graphiti_meta_knowledge"],
-    max_episodes=1
+    group_ids=["graphiti_meta_knowledge", "graphiti_reference_docs"],
+    max_episodes=10
 )
-# Look for: "Meta: Session Entry Point - Start Here for New Claude Instances"
+
+# Step 3: Search for specific topics
+mcp__graphiti-local__search_nodes(
+    query="episode design best practices",
+    group_ids=["graphiti_meta_knowledge"],
+    max_nodes=5
+)
 ```
 
-This episode contains:
-- ✅ Graph structure overview (4 knowledge graphs available)
-- ✅ What each graph contains and how to query it
-- ✅ Known limitations and workarounds
-- ✅ What previous sessions accomplished
-- ✅ Recommended next exploration priorities
+## ⚠️ Critical: Always Specify group_ids
+
+**The most common mistake**: Querying without `group_ids` returns empty results.
+
+```python
+# ❌ WRONG - Returns nothing (queries default "main" namespace which is empty)
+mcp__graphiti-local__get_episodes(max_episodes=10)
+mcp__graphiti-local__search_nodes(query="graphiti")
+
+# ✅ CORRECT - Always specify group_ids explicitly
+mcp__graphiti-local__get_episodes(
+    group_ids=["graphiti_meta_knowledge"],
+    max_episodes=10
+)
+mcp__graphiti-local__search_nodes(
+    query="graphiti",
+    group_ids=["graphiti_meta_knowledge"]
+)
+```
+
+## Available Knowledge Graphs
+
+| Group ID | Purpose |
+|----------|---------|
+| `graphiti_meta_knowledge` | How to use Graphiti effectively |
+| `graphiti_reference_docs` | Reference documentation summaries |
+
+**Query current counts:**
+```python
+# Get live episode counts (don't rely on hardcoded numbers)
+mcp__docker__read_neo4j_cypher(
+    query="MATCH (e:Episodic) RETURN e.group_id AS group_id, count(*) AS episodes ORDER BY episodes DESC"
+)
+```
+
+**Query all groups at once:**
+```python
+mcp__graphiti-local__get_episodes(
+    group_ids=["graphiti_meta_knowledge", "graphiti_reference_docs"],
+    max_episodes=20
+)
+```
 
 ---
 
 > **🔒 SECURITY WARNING**: Never commit sensitive information to knowledge graphs:
 > - API keys, passwords, tokens, credentials, PII, PHI, proprietary business data
 >
-> **All episodes are stored in plaintext**. See [CLAUDE.md:194](CLAUDE.md#L194) for best practices.
+> **All episodes are stored in plaintext**. See [CLAUDE.md](../CLAUDE.md) for best practices.
 
 ---
 
-## Alternative: Manual Quick Start
+## ⛔ Guardrails - DO NOT (Without Explicit User Request)
 
-If you prefer to explore directly:
+| Action | Why It's Dangerous | What To Do Instead |
+|--------|-------------------|-------------------|
+| `clear_graph` | Permanently deletes ALL data | Ask user first |
+| `delete_episode` | Irreversible data loss | Ask user first |
+| `delete_entity_edge` | Removes relationships | Ask user first |
+| Assume empty = broken | Usually wrong group_id | Check parameters first |
+| "Fix" without asking | Might delete valid data | Report findings, ask user |
+
+**If results are empty:** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - it's almost always a `group_ids` parameter issue, NOT a broken system.
+
+---
+
+## Quick Exploration Examples
 
 ```python
-# 1. Check connection
-mcp__graphiti-local__get_status()
-
-# 2. Browse meta-knowledge (how to use Graphiti)
+# Browse meta-knowledge (how to use Graphiti)
 mcp__graphiti-local__get_episodes(
     group_ids=["graphiti_meta_knowledge"],
     max_episodes=10
 )
 
-# 3. Browse decision tree (architecture selection guide)
-mcp__graphiti-local__get_episodes(
-    group_ids=["agent_memory_decision_tree_2025"],
-    max_episodes=10
+# Search for entities about a topic
+mcp__graphiti-local__search_nodes(
+    query="temporal tracking valid_at invalid_at",
+    group_ids=["graphiti_meta_knowledge"],
+    max_nodes=10
+)
+
+# Find relationships/facts
+mcp__graphiti-local__search_memory_facts(
+    query="Graphiti strengths and ideal use cases",
+    group_ids=["graphiti_meta_knowledge"],
+    max_facts=10
 )
 ```
 
@@ -208,7 +271,7 @@ This creates 10 foundational episodes covering:
 | `get_entity_edge` | Get edge/relationship by UUID |
 | `delete_episode` | Remove episode |
 | `delete_entity_edge` | Remove relationship |
-| `clear_graph` | Clear all data for group(s) |
+| `clear_graph` | ⚠️ **DESTRUCTIVE** - Permanently deletes all data for specified group(s) |
 
 ---
 
@@ -239,11 +302,14 @@ See [`reference/QUICK_START_QDRANT_MCP_CLIENT.md`](reference/QUICK_START_QDRANT_
 
 ## Group Strategy
 
-| Group | Purpose |
-|-------|---------|
-| `graphiti_meta_knowledge` | How to use Graphiti (always query first) |
-| `{domain}_decision_tree_{year}` | Domain-specific knowledge graphs |
-| `{project}_learnings` | Session-specific discoveries |
+| Group | Purpose | Query First? |
+|-------|---------|--------------|
+| `graphiti_meta_knowledge` | How to use Graphiti effectively | ✅ Yes |
+| `graphiti_reference_docs` | Reference documentation summaries | Optional |
+| `{domain}_decision_tree_{year}` | Domain-specific knowledge graphs | As needed |
+| `{project}_learnings` | Session-specific discoveries | As needed |
+
+**Important**: The default `group_id` in config is `main`, but this namespace is typically empty. Always explicitly specify `group_ids` in your queries.
 
 ---
 
@@ -256,6 +322,146 @@ See [`reference/QUICK_START_QDRANT_MCP_CLIENT.md`](reference/QUICK_START_QDRANT_
 
 ---
 
+## Monitoring & Debugging (For Claude Code)
+
+Claude Code has access to **three tiers** of Neo4j tools via MCP:
+
+### Neo4j Access Tiers Overview
+
+| Tier | MCP Server | Status | Use For |
+|------|------------|--------|---------|
+| **1. Semantic** | `graphiti-local` | ✅ Ready | Memory operations, search, add episodes |
+| **2. Query** | `neo4j-cypher` | ✅ Ready | Direct Cypher queries, data quality audits |
+| **3. Management** | `neo4j-cloud-aura-api` | ✅ Ready | Pause/resume instance, scaling, monitoring |
+
+---
+
+### Tier 1: Graphiti MCP Tools (Always Available)
+
+Use these for day-to-day semantic operations:
+
+```python
+# Health check
+mcp__graphiti-local__get_status()
+
+# Check what's in each namespace
+mcp__graphiti-local__get_episodes(
+    group_ids=["graphiti_meta_knowledge", "graphiti_reference_docs"],
+    max_episodes=50
+)
+
+# Search for specific entities
+mcp__graphiti-local__search_nodes(
+    query="your search term",
+    group_ids=["graphiti_meta_knowledge"],
+    max_nodes=20
+)
+
+# Find relationships/facts
+mcp__graphiti-local__search_memory_facts(
+    query="your search term",
+    group_ids=["graphiti_meta_knowledge"],
+    max_facts=20
+)
+```
+
+---
+
+### Tier 2: Direct Cypher Queries (Requires Configuration)
+
+For data quality audits and advanced analysis, use the `neo4j-cypher` MCP server:
+
+```python
+# Database statistics
+mcp__docker__read_neo4j_cypher(
+    query="CALL apoc.meta.stats() YIELD nodeCount, relCount RETURN nodeCount, relCount"
+)
+
+# Group distribution
+mcp__docker__read_neo4j_cypher(
+    query="MATCH (e:Episodic) RETURN e.group_id AS group_id, count(*) AS count ORDER BY count DESC"
+)
+
+# Data quality: Find entities missing embeddings (CRITICAL - breaks search)
+mcp__docker__read_neo4j_cypher(
+    query="MATCH (n:Entity) WHERE n.name_embedding IS NULL RETURN n.name, n.group_id LIMIT 20"
+)
+
+# Find orphan entities
+mcp__docker__read_neo4j_cypher(
+    query="MATCH (n:Entity) WHERE NOT (n)-[:RELATES_TO]-() RETURN n.name, n.group_id LIMIT 20"
+)
+```
+
+**Configuration**: Add `neo4j-cypher` to Docker MCP with database credentials.
+**Alternative**: Use Neo4j Browser directly with queries from `scripts/cypher/`.
+
+---
+
+### Tier 3: Neo4j Aura Instance Management (Requires Configuration)
+
+For infrastructure operations, use the `neo4j-cloud-aura-api` MCP server:
+
+```python
+# List all Aura instances
+mcp__docker__list_instances()
+
+# Get instance details by name
+mcp__docker__get_instance_by_name(name="your-instance-name")
+
+# Get instance details by ID
+mcp__docker__get_instance_details(instance_ids=["your-instance-id"])
+
+# Pause instance (cost savings when not in use)
+mcp__docker__pause_instance(instance_id="your-instance-id")
+
+# Resume paused instance
+mcp__docker__resume_instance(instance_id="your-instance-id")
+
+# Scale memory (GB)
+mcp__docker__update_instance_memory(instance_id="your-instance-id", memory=2)
+
+# Enable vector optimization (for embedding workloads)
+mcp__docker__update_instance_vector_optimization(
+    instance_id="your-instance-id",
+    vector_optimized=True
+)
+```
+
+**Configuration**:
+1. Go to [Neo4j Aura Console](https://console.neo4j.io) → Account → API Credentials
+2. Create credentials and note the `client_id` and `client_secret`
+3. Configure Docker MCP with `NEO4J_AURA_CLIENT_ID` and `NEO4J_AURA_CLIENT_SECRET`
+
+---
+
+### Cypher Query Reference Files
+
+Pre-built query files for Neo4j Browser are in `scripts/cypher/`:
+
+| File | Purpose | Frequency |
+|------|---------|-----------|
+| `01_health_dashboard.cypher` | Database stats, group distribution | Daily |
+| `02_data_quality.cypher` | Missing embeddings, orphans, duplicates | Weekly |
+| `03_temporal_analysis.cypher` | Fact invalidation, knowledge evolution | As needed |
+| `04_debug_search.cypher` | Find entities/episodes by name/UUID | As needed |
+| `05_capacity_planning.cypher` | Size estimates, growth trends | Monthly |
+
+---
+
+### Common Issues & Solutions
+
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| Empty query results | Missing `group_ids` | Always specify `group_ids` explicitly |
+| "No episodes found" | Wrong namespace | List groups: `get_episodes(group_ids=[...])` |
+| Search returns nothing | Embeddings missing | Run `02_data_quality.cypher` check |
+| Slow queries | Large result sets | Reduce `max_*` params or add LIMIT |
+| Cypher auth error | MCP not configured | Use Neo4j Browser or configure `neo4j-cypher` |
+| Aura API 401 error | Missing API credentials | Configure `NEO4J_AURA_CLIENT_ID/SECRET` |
+
+---
+
 ## Quick Reference Card
 
 ```
@@ -265,4 +471,5 @@ JSON Rule:          Flat structure, include id/name/description
 Verification:       get_episodes → search_nodes (5-10s) → search_memory_facts (10-15s)
 Meta-knowledge:     Always query graphiti_meta_knowledge first
 Recovery:           uv run python scripts/populate_meta_knowledge.py
+Cypher Queries:     scripts/cypher/*.cypher (for Neo4j Browser or MCP)
 ```

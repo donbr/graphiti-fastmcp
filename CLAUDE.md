@@ -2,6 +2,34 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+## ⚡ First Steps for New Sessions
+
+**Before doing anything else:**
+
+1. **Run `/verify`** - Confirms environment is working (or see `docs/QUICKSTART.md`)
+2. **Check `docs/TASKS.md`** - Current work in progress
+3. **If something seems wrong** - See `docs/TROUBLESHOOTING.md` before attempting fixes
+
+**Critical Rule:** Always specify `group_ids` in Graphiti queries. Empty results usually mean wrong namespace, NOT a broken system.
+
+### Quick Links
+| Document | Purpose |
+|----------|---------|
+| `docs/QUICKSTART.md` | Day 1 verification, guardrails, tool reference |
+| `docs/TASKS.md` | Current task list and progress |
+| `docs/TROUBLESHOOTING.md` | Calm diagnostic guidance |
+| `.claude/commands/verify.md` | `/verify` slash command |
+
+### ⛔ DO NOT (Without Explicit User Request)
+- Run `clear_graph` - permanently deletes ALL data
+- Delete episodes or entities
+- Assume empty results means broken system
+- "Fix" anything without asking the user first
+
+---
+
 ## Project Overview
 
 This is a Graphiti MCP (Model Context Protocol) Server implementation that exposes knowledge graph functionality through the MCP protocol. The project demonstrates integration of **Graphiti** (knowledge graph framework) with **FalkorDB** (in-memory graph database) and **Neo4j**.
@@ -12,7 +40,7 @@ This is a Graphiti MCP (Model Context Protocol) Server implementation that expos
 - AI agent learning resources (progressive examples)
 - Disaster recovery (backup/restore scripts)
 
-> **Quick start**: See `QUICKSTART.md` for a 5-minute introduction.
+> **Quick start**: See `docs/QUICKSTART.md` for a 5-minute introduction.
 > **Version**: Pinned to `graphiti-core==0.24.1` for stability.
 
 ## Quick Command Reference

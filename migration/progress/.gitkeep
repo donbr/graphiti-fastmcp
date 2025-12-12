@@ -1,0 +1,5 @@
+# This directory stores migration progress state files.
+# Files here should NOT be committed (except .gitkeep).
+# Add to .gitignore:
+#   migration/progress/*.json
+#   migration/logs/*.log

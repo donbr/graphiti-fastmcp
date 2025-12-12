@@ -63,6 +63,22 @@ LOG_DIR = PROJECT_ROOT / "migration" / "logs"
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+# ============================================================================
+# Constants (documented magic numbers)
+# ============================================================================
+
+# Maximum exponential backoff factor (2^4 = 16x base delay)
+MAX_BACKOFF_MULTIPLIER = 16.0
+
+# Maximum seconds to wait between API calls during rate limiting
+MAX_RATE_LIMIT_DELAY = 60.0
+
+# Maximum migration runtime in seconds (16 hours)
+MAX_MIGRATION_TIMEOUT = 16 * 3600
+
+# Warning threshold for entity observation count
+LARGE_ENTITY_OBSERVATION_THRESHOLD = 100
+
 
 class ProcessingMode(Enum):
     SEQUENTIAL = "sequential"
@@ -248,12 +264,26 @@ def save_state(state: MigrationState) -> None:
 # ============================================================================
 
 def load_agent_definition(agent_name: str) -> dict:
-    """Load agent definition from JSON file."""
+    """Load agent definition from JSON file.
+
+    Args:
+        agent_name: Name of the agent (without .json extension)
+
+    Returns:
+        Agent definition dictionary
+
+    Raises:
+        FileNotFoundError: If agent definition file doesn't exist
+        ValueError: If agent definition contains invalid JSON
+    """
     agent_file = AGENTS_DIR / f"{agent_name}.json"
     if not agent_file.exists():
         raise FileNotFoundError(f"Agent definition not found: {agent_file}")
-    with open(agent_file) as f:
-        return json.load(f)
+    try:
+        with open(agent_file) as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in agent definition {agent_file}: {e}") from e
 
 
 # ============================================================================
@@ -300,10 +330,25 @@ def classify_entity(entity: dict) -> str:
 
 
 def convert_entity_to_episode(entity: dict, group_id: str) -> dict:
-    """Convert a Neo4j Memory entity to Graphiti episode format."""
+    """Convert a Neo4j Memory entity to Graphiti episode format.
+
+    Args:
+        entity: Neo4j Memory entity with name, type, and observations
+        group_id: Target Graphiti group_id namespace
+
+    Returns:
+        Episode dictionary ready for add_memory call
+    """
     name = entity.get("name", "Unknown")
     entity_type = entity.get("type", "unknown")
     observations = entity.get("observations", [])
+
+    # Warn about large entities that may cause memory issues
+    if len(observations) > LARGE_ENTITY_OBSERVATION_THRESHOLD:
+        logging.warning(
+            f"Entity '{name}' has {len(observations)} observations "
+            f"(threshold: {LARGE_ENTITY_OBSERVATION_THRESHOLD}). Consider chunking."
+        )
 
     # Determine source type based on entity type
     if entity_type in ["Experience", "JobPosting", "Credentials", "Skills"]:
@@ -336,41 +381,55 @@ def convert_entity_to_episode(entity: dict, group_id: str) -> dict:
 # ============================================================================
 
 class RateLimiter:
-    """Rate limiter with exponential backoff."""
+    """Rate limiter with exponential backoff for API calls."""
 
     def __init__(self):
         self.last_call_time: dict[str, float] = {}
         self.backoff_multiplier: dict[str, float] = {}
-        self.max_delay = 60.0
 
     async def wait_if_needed(self, key: str, base_delay: float) -> None:
-        """Wait if needed based on rate limiting."""
+        """Wait if needed based on rate limiting.
+
+        Args:
+            key: Identifier for the rate-limited resource
+            base_delay: Base delay in seconds before backoff multiplier
+        """
         import time
 
         multiplier = self.backoff_multiplier.get(key, 1.0)
-        delay = min(base_delay * multiplier, self.max_delay)
+        delay = min(base_delay * multiplier, MAX_RATE_LIMIT_DELAY)
 
         last_time = self.last_call_time.get(key, 0)
         elapsed = time.time() - last_time
 
         if elapsed < delay:
             wait_time = delay - elapsed
-            logging.debug(f"Rate limiting: waiting {wait_time:.1f}s")
+            logging.debug(f"Rate limiting: waiting {wait_time:.1f}s (multiplier: {multiplier}x)")
             await asyncio.sleep(wait_time)
 
         self.last_call_time[key] = time.time()
 
     def record_error(self, key: str) -> None:
-        """Record error to increase backoff."""
+        """Record error to increase backoff exponentially."""
         current = self.backoff_multiplier.get(key, 1.0)
-        self.backoff_multiplier[key] = min(current * 2, 16.0)
-        logging.warning(f"Backoff increased for {key}: {self.backoff_multiplier[key]}x")
+        new_multiplier = min(current * 2, MAX_BACKOFF_MULTIPLIER)
+        self.backoff_multiplier[key] = new_multiplier
+
+        if new_multiplier >= MAX_BACKOFF_MULTIPLIER:
+            logging.error(
+                f"Rate limiter for {key} at maximum backoff ({MAX_BACKOFF_MULTIPLIER}x). "
+                "Consider pausing migration or checking API status."
+            )
+        else:
+            logging.warning(f"Backoff increased for {key}: {new_multiplier}x")
 
     def record_success(self, key: str) -> None:
-        """Record success to decrease backoff."""
+        """Record success to decrease backoff gradually."""
         if key in self.backoff_multiplier:
             current = self.backoff_multiplier[key]
             self.backoff_multiplier[key] = max(current / 2, 1.0)
+            if current > 1.0:
+                logging.debug(f"Backoff decreased for {key}: {self.backoff_multiplier[key]}x")
 
 
 # ============================================================================
@@ -590,6 +649,9 @@ async def run_sdk_migration(
         },
     )
 
+    # Track migration start time for timeout checking
+    migration_start = datetime.now(timezone.utc)
+
     async with ClaudeSDKClient(options=options) as client:
         # Build migration prompt
         groups_info = "\n".join([
@@ -613,19 +675,64 @@ Instructions:
 3. For don_branson_career: Use extractor_sequential subagent (one at a time)
 4. For other groups: Use extractor_batch subagent (batches of 10)
 5. After each group: Run validation_agent subagent
-6. Update migration state after each batch
+6. After completing a group, report: COMPLETED_GROUP:<group_id>
+7. After each entity, report: MIGRATED_ENTITY:<group_id>:<entity_name>
+8. On validation pass, report: VALIDATION_PASS:<group_id>
 
 Begin migration.
 """
 
         await client.query(prompt)
 
-        # Process responses
+        # Process responses and update state
         async for msg in client.receive_response():
-            logging.info(f"Orchestrator: {msg}")
+            # Check for timeout (Python 3.10 compatible approach)
+            elapsed = (datetime.now(timezone.utc) - migration_start).total_seconds()
+            if elapsed > MAX_MIGRATION_TIMEOUT:
+                logging.error(
+                    f"Migration timed out after {MAX_MIGRATION_TIMEOUT // 3600} hours. "
+                    "Use --resume to continue from checkpoint."
+                )
+                state.errors.append({
+                    "type": "timeout",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "message": f"Migration exceeded {MAX_MIGRATION_TIMEOUT // 3600} hour limit",
+                })
+                break
 
-            # Update state based on responses
-            # (In production, parse structured responses)
+            msg_str = str(msg)
+            logging.info(f"Orchestrator: {msg_str[:200]}...")
+
+            # Parse structured responses for state updates
+            if "COMPLETED_GROUP:" in msg_str:
+                group_id = msg_str.split("COMPLETED_GROUP:")[1].split()[0].strip()
+                if group_id not in state.completed_groups:
+                    state.completed_groups.append(group_id)
+                    logging.info(f"Group completed: {group_id}")
+                state.in_progress_group = None
+                save_state(state)
+
+            elif "MIGRATED_ENTITY:" in msg_str:
+                parts = msg_str.split("MIGRATED_ENTITY:")[1].split(":")
+                if len(parts) >= 2:
+                    group_id = parts[0].strip()
+                    entity_name = parts[1].split()[0].strip()
+                    state.in_progress_group = group_id
+                    if group_id not in state.completed_episodes:
+                        state.completed_episodes[group_id] = []
+                    if entity_name not in state.completed_episodes[group_id]:
+                        state.completed_episodes[group_id].append(entity_name)
+                    # Save state periodically (every 10 entities)
+                    if len(state.completed_episodes[group_id]) % 10 == 0:
+                        save_state(state)
+
+            elif "VALIDATION_PASS:" in msg_str:
+                group_id = msg_str.split("VALIDATION_PASS:")[1].split()[0].strip()
+                state.validation_results[group_id] = {
+                    "pass": True,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                save_state(state)
 
     save_state(state)
     logging.info("Migration complete!")

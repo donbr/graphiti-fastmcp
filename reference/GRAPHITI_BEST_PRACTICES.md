@@ -114,7 +114,7 @@ When using `source="json"`:
 
 ### Key Insight: MCP Context Requirement
 
-MCP tools like `mcp__graphiti-fastmcp__add_memory` are **only accessible within Claude's context** (Claude Code, Cursor with MCP).
+MCP tools like `mcp__graphiti-local__add_memory` are **only accessible within Claude's context** (Claude Code, Cursor with MCP).
 
 Standalone Python scripts cannot directly call MCP tools. Options:
 1. Use Claude's direct MCP tool access for ingestion
@@ -191,7 +191,7 @@ Common edge types extracted by Graphiti:
 ### Add a Best Practice
 
 ```python
-mcp__graphiti-fastmcp__add_memory(
+mcp__graphiti-local__add_memory(
     name="Best Practice: JSON Ingestion - Flattening",
     episode_body='{"id": "bp_001", "name": "...", "description": "...", "practices": [...]}',
     source="json",
@@ -203,7 +203,7 @@ mcp__graphiti-fastmcp__add_memory(
 ### Add a Session Learning
 
 ```python
-mcp__graphiti-fastmcp__add_memory(
+mcp__graphiti-local__add_memory(
     name="Lesson: MCP Tools - Context Requirement",
     episode_body="Key learning: MCP tools only accessible within Claude context...",
     source="text",

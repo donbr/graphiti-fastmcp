@@ -10,11 +10,11 @@ I was asked to validate access to a Graphiti knowledge graph system. The instruc
 
 ```python
 # 1. Check connection
-mcp__graphiti-fastmcp__get_status()
+mcp__graphiti-local__get_status()
 # ✅ Expected: {"status": "ok", "group_ids": [...]}
 
 # 2. Recover recent session context
-mcp__graphiti-fastmcp__search_memory_facts(
+mcp__graphiti-local__search_memory_facts(
     query="session priorities pending tasks",
     group_ids=["graphiti_meta_knowledge"],
     max_facts=10
@@ -22,7 +22,7 @@ mcp__graphiti-fastmcp__search_memory_facts(
 # ❌ Got: "No relevant facts found"
 
 # 3. Query meta-knowledge
-mcp__graphiti-fastmcp__search_memory_facts(
+mcp__graphiti-local__search_memory_facts(
     query="best practices episode design",
     group_ids=["graphiti_meta_knowledge"],
     max_facts=5
@@ -121,7 +121,7 @@ I decided to test with the correct group_id:
 
 ```python
 # Test 1: Get episodes from "main" group
-mcp__graphiti-fastmcp__get_episodes(
+mcp__graphiti-local__get_episodes(
     group_ids=["main"],
     max_episodes=5
 )
@@ -146,7 +146,7 @@ Then I tested search:
 
 ```python
 # Test 2: Search nodes
-mcp__graphiti-fastmcp__search_nodes(
+mcp__graphiti-local__search_nodes(
     query="MCP tools knowledge graph operations",
     group_ids=["main"],
     max_nodes=5
@@ -171,7 +171,7 @@ Finally, relationships:
 
 ```python
 # Test 3: Search facts
-mcp__graphiti-fastmcp__search_memory_facts(
+mcp__graphiti-local__search_memory_facts(
     query="MCP tools for knowledge graph operations",
     group_ids=["main"],
     max_facts=10
@@ -295,7 +295,7 @@ This fact was valid for ~2.5 minutes before being superseded by new information.
 
 2. **Use consistent group_ids when adding episodes**
    ```python
-   mcp__graphiti-fastmcp__add_memory(
+   mcp__graphiti-local__add_memory(
        name="Episode: My Data",
        episode_body="Content...",
        group_id="my_project",  # Explicit is better than implicit
@@ -305,7 +305,7 @@ This fact was valid for ~2.5 minutes before being superseded by new information.
 
 3. **Query with the same group_id you used when adding**
    ```python
-   mcp__graphiti-fastmcp__search_nodes(
+   mcp__graphiti-local__search_nodes(
        query="my data",
        group_ids=["my_project"],  # Match what you used in add_memory
        max_nodes=5

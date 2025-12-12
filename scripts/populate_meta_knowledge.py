@@ -188,7 +188,7 @@ Allow brief delay (15-20 seconds) for background processing to complete before v
     # Episode 6: MCP Context Requirement
     {
         "name": "Lesson: MCP Tools - Context Requirement",
-        "episode_body": """MCP tools like mcp__graphiti-fastmcp__add_memory are only accessible within Claude's context (Claude Code, Cursor with MCP configured).
+        "episode_body": """MCP tools like mcp__graphiti-local__add_memory are only accessible within Claude's context (Claude Code, Cursor with MCP configured).
 
 Standalone Python scripts cannot directly call MCP tools through the mcp__ prefix. Options for programmatic access:
 1. Use the MCP Python SDK with streamablehttp_client to connect to http://localhost:8000/mcp/

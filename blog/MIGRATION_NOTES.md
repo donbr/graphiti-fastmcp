@@ -70,7 +70,7 @@ After migration, all core Graphiti MCP tools work correctly:
 
 ### ✅ get_episodes - WORKING
 ```python
-mcp__graphiti-fastmcp__get_episodes(
+mcp__graphiti-local__get_episodes(
     group_ids=["graphiti_meta_knowledge"],
     max_episodes=5
 )
@@ -79,7 +79,7 @@ mcp__graphiti-fastmcp__get_episodes(
 
 ### ✅ get_status - WORKING
 ```python
-mcp__graphiti-fastmcp__get_status()
+mcp__graphiti-local__get_status()
 # Returns: {"status":"ok","message":"Graphiti MCP server...connected to falkordb database"}
 ```
 
@@ -129,7 +129,7 @@ This default is why the "main" namespace worked in initial testing - it matched 
 ### 3. **group_id is Explicitly Set, Not Inferred**
 When adding episodes, always specify group_id:
 ```python
-mcp__graphiti-fastmcp__add_memory(
+mcp__graphiti-local__add_memory(
     name="My Episode",
     episode_body="...",
     group_id="my_project",  # Explicit is better than default
@@ -164,7 +164,7 @@ uv run python scripts/migrate_simple.py --dry-run
 uv run python scripts/migrate_simple.py
 
 # Verify results
-mcp__graphiti-fastmcp__get_episodes(group_ids=["graphiti_meta_knowledge"], max_episodes=5)
+mcp__graphiti-local__get_episodes(group_ids=["graphiti_meta_knowledge"], max_episodes=5)
 mcp__falkordb__execute_query(graph_name="default_db", query="MATCH (n) RETURN count(n)")
 ```
 

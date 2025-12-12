@@ -54,7 +54,7 @@ Added examples from `graphiti_meta_knowledge`:
 
 **Architecture characteristics**:
 ```python
-mcp__graphiti-fastmcp__add_memory(
+mcp__graphiti-local__add_memory(
     name="Architecture: MySystem - Characteristics",
     episode_body='{"system": "MySystem", "strengths": ["low latency", "horizontal scaling", "real-time processing"], "weaknesses": ["complex setup", "requires monitoring"], "ideal_for": ["high-throughput APIs", "real-time analytics"], "cost_profile": {"latency": "low", "operational_overhead": "medium"}}',
     source="json",
@@ -65,7 +65,7 @@ mcp__graphiti-fastmcp__add_memory(
 
 **Decision criteria**:
 ```python
-mcp__graphiti-fastmcp__add_memory(
+mcp__graphiti-local__add_memory(
     name="Decision: Database Selection - Criteria",
     episode_body='{"decision": "database_selection", "options": [{"name": "PostgreSQL", "strengths": ["ACID compliance", "mature ecosystem"]}, {"name": "FalkorDB", "strengths": ["graph queries", "Redis-based"]}], "requirements": ["sub-100ms queries", "graph traversal"], "constraints": ["max 2GB dataset", "cloud deployment"]}',
     source="json",
@@ -86,7 +86,7 @@ Added examples from actual project learnings:
 
 **Pattern evolution**:
 ```python
-mcp__graphiti-fastmcp__add_memory(
+mcp__graphiti-local__add_memory(
     name="Lesson: FastMCP Deployment - Evolution from Global State to Factory Pattern",
     episode_body="The deployment pattern evolved from using global state (2024) to factory pattern (2025). The key innovation was recognizing that FastMCP Cloud ignores if __name__ == '__main__' blocks. This represents a shift from imperative initialization to declarative factory functions. The factory pattern produces cleaner testability and eliminates global state complexity.",
     source="text",
@@ -97,7 +97,7 @@ mcp__graphiti-fastmcp__add_memory(
 
 **Causal explanation**:
 ```python
-mcp__graphiti-fastmcp__add_memory(
+mcp__graphiti-local__add_memory(
     name="Lesson: Graphiti Service Initialization - Root Cause Discovery",
     episode_body="We discovered that 'Graphiti service not initialized' errors occurred because FastMCP Cloud uses fastmcp run internally, which completely disregards the if __name__ == '__main__' block. The solution was implementing a create_server() factory function that initializes services before returning the FastMCP instance. This fixed deployment failures by ensuring initialization happens on module import, not script execution.",
     source="text",
@@ -120,14 +120,14 @@ Added concrete timing guidance from `graphiti_meta_knowledge`:
 
 ```python
 # Step 1: Confirm episode stored (immediate - no wait needed)
-mcp__graphiti-fastmcp__get_episodes(
+mcp__graphiti-local__get_episodes(
     group_ids=["architecture_decision_tree_2025"],
     max_episodes=5
 )
 # ✅ Confirms: Episode ingested successfully
 
 # Step 2: Verify entities extracted (wait 5-10 seconds)
-mcp__graphiti-fastmcp__search_nodes(
+mcp__graphiti-local__search_nodes(
     query="MySystem latency",
     group_ids=["architecture_decision_tree_2025"],
     max_nodes=5
@@ -135,7 +135,7 @@ mcp__graphiti-fastmcp__search_nodes(
 # ✅ Confirms: Entities created
 
 # Step 3: Verify relationships created (wait 15-20 seconds total from add_memory)
-mcp__graphiti-fastmcp__search_memory_facts(
+mcp__graphiti-local__search_memory_facts(
     query="MySystem strengths and ideal use cases",
     group_ids=["architecture_decision_tree_2025"],
     max_facts=5
@@ -176,7 +176,7 @@ RETURN n.name, n.summary
 **Key findings**:
 - "three-tool verification pattern" - Documented timing: 15-20 seconds
 - "add_memory" - Queues processing, async extraction
-- "mcp__graphiti-fastmcp__add_memory" - Full tool name with timing
+- "mcp__graphiti-local__add_memory" - Full tool name with timing
 
 ---
 

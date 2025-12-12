@@ -240,10 +240,10 @@
           }
         },
         "tools_to_use": [
-          "mcp__graphiti-fastmcp__add_memory - Ingest episodes into knowledge graph",
-          "mcp__graphiti-fastmcp__search_nodes - Search for entity nodes",
-          "mcp__graphiti-fastmcp__search_memory_facts - Search for relationships/edges",
-          "mcp__graphiti-fastmcp__get_episodes - Retrieve recent episodes",
+          "mcp__graphiti-local__add_memory - Ingest episodes into knowledge graph",
+          "mcp__graphiti-local__search_nodes - Search for entity nodes",
+          "mcp__graphiti-local__search_memory_facts - Search for relationships/edges",
+          "mcp__graphiti-local__get_episodes - Retrieve recent episodes",
           "Read - Examine Graphiti configuration and existing code",
           "Bash - Run Graphiti scripts, check database status",
           "Edit - Modify Graphiti integration code"
@@ -333,7 +333,7 @@
           "Grep - Search for common error patterns in student code",
           "Bash - Run student code to validate functionality",
           "Edit - Suggest targeted fixes without giving complete solutions",
-          "mcp__graphiti-fastmcp__search_memory_facts - Retrieve past student progress and challenges"
+          "mcp__graphiti-local__search_memory_facts - Retrieve past student progress and challenges"
         ],
         "example_invocations": [
           "User: 'I'm stuck on the RAG evaluation exercise. I don't know how to set up RAGAS.'",

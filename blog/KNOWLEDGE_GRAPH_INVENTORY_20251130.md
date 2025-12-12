@@ -7,10 +7,10 @@ group_ids_explored:
   - agent_memory_decision_tree_2025
   - main
 tools_validated:
-  - mcp__graphiti-fastmcp__get_status
-  - mcp__graphiti-fastmcp__get_episodes
-  - mcp__graphiti-fastmcp__search_nodes (partial - type error encountered)
-  - mcp__graphiti-fastmcp__search_memory_facts
+  - mcp__graphiti-local__get_status
+  - mcp__graphiti-local__get_episodes
+  - mcp__graphiti-local__search_nodes (partial - type error encountered)
+  - mcp__graphiti-local__search_memory_facts
 key_learnings:
   - "Comprehensive inventory of 3 active knowledge graphs"
   - "Agent memory architecture decision framework available"
@@ -52,7 +52,7 @@ The exploration validated that the system is fully operational and contains rich
 
 ### Phase 1: Server Validation ✅
 
-**Tool**: `mcp__graphiti-fastmcp__get_status()`
+**Tool**: `mcp__graphiti-local__get_status()`
 
 **Result**:
 ```json
@@ -70,7 +70,7 @@ The exploration validated that the system is fully operational and contains rich
 
 Following the QUICKSTART.md guidance, queried for the "Session Entry Point" episode:
 
-**Tool**: `mcp__graphiti-fastmcp__get_episodes(group_ids=["graphiti_meta_knowledge"], max_episodes=1)`
+**Tool**: `mcp__graphiti-local__get_episodes(group_ids=["graphiti_meta_knowledge"], max_episodes=1)`
 
 **Unexpected Finding**: The most recent episode was not the documented "Session Entry Point" but rather a profound meta-reflection titled:
 
@@ -90,7 +90,7 @@ This episode (UUID: `fe1522a7-8059-44b8-ad44-e228ded9cf37`) contains:
 
 ### Phase 3: Complete Meta-Knowledge Inventory ✅
 
-**Tool**: `mcp__graphiti-fastmcp__get_episodes(group_ids=["graphiti_meta_knowledge"], max_episodes=10)`
+**Tool**: `mcp__graphiti-local__get_episodes(group_ids=["graphiti_meta_knowledge"], max_episodes=10)`
 
 **Result**: 10 foundational episodes covering:
 
@@ -120,7 +120,7 @@ This episode (UUID: `fe1522a7-8059-44b8-ad44-e228ded9cf37`) contains:
 
 ### Phase 4: Agent Memory Decision Tree Discovery ✅
 
-**Tool**: `mcp__graphiti-fastmcp__get_episodes(group_ids=["agent_memory_decision_tree_2025"], max_episodes=10)`
+**Tool**: `mcp__graphiti-local__get_episodes(group_ids=["agent_memory_decision_tree_2025"], max_episodes=10)`
 
 **Result**: A complete architectural decision framework with 10 episodes covering:
 
@@ -151,7 +151,7 @@ This episode (UUID: `fe1522a7-8059-44b8-ad44-e228ded9cf37`) contains:
 
 ### Phase 5: Discovery of "main" Group ✅
 
-**Tool**: `mcp__graphiti-fastmcp__get_episodes(max_episodes=20)` (no group_id filter)
+**Tool**: `mcp__graphiti-local__get_episodes(max_episodes=20)` (no group_id filter)
 
 **Result**: Discovered the **`main`** group containing 9+ episodes of basic MCP tools reference data.
 
@@ -182,7 +182,7 @@ This episode (UUID: `fe1522a7-8059-44b8-ad44-e228ded9cf37`) contains:
 
 **Recommended First Query**:
 ```python
-mcp__graphiti-fastmcp__get_episodes(
+mcp__graphiti-local__get_episodes(
     group_ids=["graphiti_meta_knowledge"],
     max_episodes=10
 )
@@ -232,7 +232,7 @@ mcp__graphiti-fastmcp__get_episodes(
 
 **Recommended Query**:
 ```python
-mcp__graphiti-fastmcp__search_memory_facts(
+mcp__graphiti-local__search_memory_facts(
     query="architecture recommendation for customer service bot",
     group_ids=["agent_memory_decision_tree_2025"],
     max_facts=10
@@ -365,7 +365,7 @@ The prior session's blog post ([GRAPHITI_MCP_DIAGNOSTIC_JOURNEY.md](GRAPHITI_MCP
 
 **Attempted**:
 ```python
-mcp__graphiti-fastmcp__search_nodes(
+mcp__graphiti-local__search_nodes(
     query="knowledge graphs available group_id",
     max_nodes=10
 )
@@ -385,7 +385,7 @@ mcp__graphiti-fastmcp__search_nodes(
 
 1. **Start with meta-knowledge**
    ```python
-   mcp__graphiti-fastmcp__get_episodes(
+   mcp__graphiti-local__get_episodes(
        group_ids=["graphiti_meta_knowledge"],
        max_episodes=10
    )
@@ -393,7 +393,7 @@ mcp__graphiti-fastmcp__search_nodes(
 
 2. **Query the decision tree for architecture guidance**
    ```python
-   mcp__graphiti-fastmcp__search_memory_facts(
+   mcp__graphiti-local__search_memory_facts(
        query="your use case or requirements",
        group_ids=["agent_memory_decision_tree_2025"],
        max_facts=10
@@ -573,7 +573,7 @@ See blog/GRAPHITI_MCP_DIAGNOSTIC_JOURNEY.md for the full story.
 
 **Solutions**:
 1. Try without group_id filter:
-   mcp__graphiti-fastmcp__get_episodes(max_episodes=20)
+   mcp__graphiti-local__get_episodes(max_episodes=20)
    # Look at "group_id" field in results
 
 2. Common group_ids to try:
@@ -584,7 +584,7 @@ See blog/GRAPHITI_MCP_DIAGNOSTIC_JOURNEY.md for the full story.
 ### search_nodes "Type mismatch" error
 
 **Solution**: Always provide explicit group_ids:
-mcp__graphiti-fastmcp__search_nodes(
+mcp__graphiti-local__search_nodes(
     query="your query",
     group_ids=["graphiti_meta_knowledge"],
     max_nodes=5
@@ -623,14 +623,14 @@ The diagnostic journey alone will save you 45 minutes of debugging.
 
 ```python
 # 1. Check connection
-mcp__graphiti-fastmcp__get_status()
+mcp__graphiti-local__get_status()
 
 # 2. See what group_ids exist
-mcp__graphiti-fastmcp__get_episodes(max_episodes=20)
+mcp__graphiti-local__get_episodes(max_episodes=20)
 # Examine "group_id" field to see namespaces
 
 # 3. Query specific groups
-mcp__graphiti-fastmcp__get_episodes(
+mcp__graphiti-local__get_episodes(
     group_ids=["graphiti_meta_knowledge"],
     max_episodes=10
 )

@@ -38,6 +38,7 @@ from typing import Any
 # Check for SDK availability
 try:
     from claude_agent_sdk import (
+        AgentDefinition,
         ClaudeAgentOptions,
         ClaudeSDKClient,
         HookMatcher,
@@ -626,26 +627,26 @@ async def run_sdk_migration(
         },
         max_turns=orchestrator_def.get("metadata", {}).get("max_turns", 100),
         cwd=str(PROJECT_ROOT),
-        # Define subagents
+        # Define subagents using AgentDefinition dataclass
         agents={
-            "extractor_sequential": {
-                "description": load_agent_definition("extractor_sequential")["description"],
-                "prompt": load_agent_definition("extractor_sequential")["prompt"],
-                "tools": load_agent_definition("extractor_sequential")["tools"],
-                "model": "sonnet",
-            },
-            "extractor_batch": {
-                "description": load_agent_definition("extractor_batch")["description"],
-                "prompt": load_agent_definition("extractor_batch")["prompt"],
-                "tools": load_agent_definition("extractor_batch")["tools"],
-                "model": "sonnet",
-            },
-            "validation_agent": {
-                "description": load_agent_definition("validation_agent")["description"],
-                "prompt": load_agent_definition("validation_agent")["prompt"],
-                "tools": load_agent_definition("validation_agent")["tools"],
-                "model": "sonnet",
-            },
+            "extractor_sequential": AgentDefinition(
+                description=load_agent_definition("extractor_sequential")["description"],
+                prompt=load_agent_definition("extractor_sequential")["prompt"],
+                tools=load_agent_definition("extractor_sequential")["tools"],
+                model="sonnet",
+            ),
+            "extractor_batch": AgentDefinition(
+                description=load_agent_definition("extractor_batch")["description"],
+                prompt=load_agent_definition("extractor_batch")["prompt"],
+                tools=load_agent_definition("extractor_batch")["tools"],
+                model="sonnet",
+            ),
+            "validation_agent": AgentDefinition(
+                description=load_agent_definition("validation_agent")["description"],
+                prompt=load_agent_definition("validation_agent")["prompt"],
+                tools=load_agent_definition("validation_agent")["tools"],
+                model="sonnet",
+            ),
         },
     )
 
